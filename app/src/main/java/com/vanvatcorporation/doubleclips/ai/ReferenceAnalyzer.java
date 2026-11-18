@@ -86,6 +86,10 @@ public final class ReferenceAnalyzer {
         float cutThr = f.thumb != null ? Math.min(0.44f, Math.max(0.34f, med + 3f * mad)) : Math.max(0.28f, med + 5f * mad);
 
         // ---- cuts: a frame very different from the last one, not a single-frame flash ----
+        // blur transitions spread a cut over several frames: compare frames ~0.25 s apart too
+        int sw = Math.max(1, Math.round(f.fps * 0.125f));
+        float[] dw = new float[n];
+        for (int i = sw; i + sw < n; i++) dw[i] = frameDistance(f, i - sw, i + sw);
         boolean[] cut = new boolean[n];
         int minGap = Math.max(1, Math.round(f.fps * 0.25f));
         int last = -minGap;
@@ -98,6 +102,22 @@ public final class ReferenceAnalyzer {
             if (isFlashFrame(f, i) && frameDistance(f, i - 1, Math.min(n - 1, i + 2)) < cutThr) continue;
             cut[i] = true;
             last = i;
+        }
+        if (f.thumb != null) {
+            for (int i = sw; i + sw < n; i++) {
+                if (dw[i] < 0.45f) continue;
+                boolean localMax = true;
+                for (int k = Math.max(0, i - 2 * sw); k <= Math.min(n - 1, i + 2 * sw); k++) if (dw[k] > dw[i]) localMax = false;
+                if (!localMax) continue;
+                boolean near = false;
+                for (int k = Math.max(0, i - minGap); k <= Math.min(n - 1, i + minGap); k++) if (cut[k]) near = true;
+                if (near) continue;
+                // the cut itself is the biggest single-frame jump inside the blurred span
+                int best = i;
+                for (int k = Math.max(1, i - sw); k <= Math.min(n - 1, i + sw); k++) if (d[k] > d[best]) best = k;
+                if (d[best] < 0.1f) continue; // smooth camera move, not a cut
+                cut[best] = true;
+            }
         }
 
         // ---- shots ----
@@ -203,6 +223,18 @@ public final class ReferenceAnalyzer {
         }
     }
 
+    /** Mean |horizontal| and |vertical| gradient of a 64x64 grey frame. */
+    static float[] gradients(float[] l) {
+        int n = MotionEstimator.SIZE;
+        double gx = 0, gy = 0;
+        for (int y = 1; y < n - 1; y++) for (int x = 1; x < n - 1; x++) {
+            int i = y * n + x;
+            gx += Math.abs(l[i + 1] - l[i - 1]);
+            gy += Math.abs(l[i + n] - l[i - n]);
+        }
+        return new float[]{(float) gx, (float) gy};
+    }
+
     /** Mean absolute Laplacian of a 64x64 grey frame: high = sharp, low = blurred. */
     static float sharpness(float[] l) {
         int n = MotionEstimator.SIZE;
@@ -252,9 +284,17 @@ public final class ReferenceAnalyzer {
             pan += m[1];
             zoom += Math.abs(m[0] - 1f);
         }
+        // streak direction: a sideways motion blur wipes out horizontal detail but keeps vertical detail
+        float gx = 0, gy = 0;
+        for (int i = Math.max(0, cut - before); i < Math.min(n, cut + after); i++) {
+            if (f.luma[i] == null) continue;
+            float[] g = gradients(f.luma[i]);
+            gx += g[0]; gy += g[1];
+        }
+        boolean sideways = gy > 0 && gx / gy < 0.75f;
         String style;
         if (before + after < 2) style = "flash-blur";
-        else if (Math.abs(pan) > zoom * 1.2f && Math.abs(pan) > 0.04f) style = pan < 0 ? "whip-left" : "whip-right";
+        else if (sideways || (Math.abs(pan) > zoom * 1.2f && Math.abs(pan) > 0.04f)) style = pan < 0 ? "whip-left" : "whip-right";
         else style = flash ? "flash-blur" : "zoom-blur";
         a.transitionOut = style;
         float span = 2f * Math.max(Math.max(before, after), 1) + 1f;

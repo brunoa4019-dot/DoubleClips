@@ -140,6 +140,8 @@ public final class AutoEditPlanner {
         /** Camera work copied from the reference (see ReferenceAnalyzer.RefShot), sampled at camFps over the shot; or null. */
         public float[] camZoom, camX, camY, light;
         public float camFps;
+        /** Average luma of the reference shot the light curve belongs to (to turn the curve into brightness). */
+        public float lightBase = 0.4f;
     }
 
     /** A short hit on the beat, drawn by an effect clip on a layer above the shots (affects the whole picture). */
@@ -155,6 +157,8 @@ public final class AutoEditPlanner {
         public float duration;
         /** Colour look to give every shot (filled by the caller when copying a reference): saturation x, brightness +. */
         public float saturation = 1f, brightness = 0f;
+        /** Colour temperature for every shot (6500 = neutral; the editor tints red/blue around it). */
+        public float temperature = 6500f;
     }
 
     // ================================ finishing touches ================================
@@ -410,7 +414,7 @@ public final class AutoEditPlanner {
         }
 
         // ---- lock the cuts to the impacts of the song ----
-        lockCutsToHits(starts, templates, music, songLength);
+        lockCutsToHits(starts, templates, music, songLength, !Float.isNaN(shift));
 
         // ---- drop cuts too close together (keeps the timeline gap-free) ----
         for (int k = starts.size() - 1; k > 0; k--) {
@@ -441,6 +445,7 @@ public final class AutoEditPlanner {
             picker.fill(shot, len * 1f, tpl.camZoom != null ? tpl.brightness : Float.NaN);
             if (tpl.camZoom != null) {
                 shot.camZoom = tpl.camZoom; shot.camX = tpl.camX; shot.camY = tpl.camY; shot.light = tpl.light;
+                shot.lightBase = tpl.brightness;
                 shot.camFps = tpl.camFps * (tpl.end - tpl.start > 0.01f ? (tpl.end - tpl.start) / len : 1f) / 1f;
             }
             // with the light curve copied, the reference's flashes are already in it: no extra flash effect on top
@@ -467,8 +472,11 @@ public final class AutoEditPlanner {
      * Every cut moves onto the strongest impact near it (up to 0.3 s away), and every big impact that has no cut near it
      * gets one: the scene changes exactly on the hits you hear.
      */
-    static void lockCutsToHits(List<Float> starts, List<ReferenceAnalyzer.RefShot> templates, BeatDetector.Result music, float songLength) {
+    static void lockCutsToHits(List<Float> starts, List<ReferenceAnalyzer.RefShot> templates, BeatDetector.Result music, float songLength,
+                               boolean sameSong) {
         if (music == null || music.onsets.length == 0) return;
+        // same song: the reference already cuts where it wants; only fix tiny timing errors, add nothing
+        float far = sameSong ? 0.06f : 0.3f;
         // 1) move each cut onto the best hit around it
         for (int k = 1; k < starts.size(); k++) {
             float t = starts.get(k);
@@ -478,7 +486,7 @@ public final class AutoEditPlanner {
                 float d = Math.abs(music.onsets[i] - t);
                 // only real impacts count; a very close weak hit is still better than none
                 boolean impact = music.onsetStrength[i] >= 0.6f;
-                if (d > (impact ? 0.3f : 0.06f)) continue;
+                if (d > (impact ? far : 0.06f)) continue;
                 if (starts.contains(music.onsets[i])) continue;
                 double score = music.onsetStrength[i] - 1.5 * d + (impact ? 1.0 : 0.0); // impacts always win
                 if (score > bestScore) { bestScore = score; best = music.onsets[i]; }
@@ -487,8 +495,8 @@ public final class AutoEditPlanner {
             float prev = starts.get(k - 1), next = k + 1 < starts.size() ? starts.get(k + 1) : songLength;
             if (best - prev >= 0.15f && next - best >= 0.15f) starts.set(k, best);
         }
-        // 2) big impacts without a cut get one
-        for (int i = 0; i < music.onsets.length; i++) {
+        // 2) big impacts without a cut get one (only on a different song: the reference's own song is already covered)
+        for (int i = 0; i < music.onsets.length && !sameSong; i++) {
             if (music.onsetStrength[i] < 0.95f) continue;
             float t = music.onsets[i];
             if (t < 0.3f || t > songLength - 0.3f) continue;
@@ -526,6 +534,13 @@ public final class AutoEditPlanner {
             }
         }
         return r;
+    }
+
+    /** Brightness (editor units, -10..10 = luma x10) that reproduces the reference's light at sample i of the shot. */
+    public static float lightToBrightness(Shot s, int i) {
+        if (s.light == null || s.light.length == 0) return 0f;
+        float l = s.light[Math.max(0, Math.min(s.light.length - 1, i))];
+        return Math.max(-3f, Math.min(3f, (l - 1f) * s.lightBase * 10f));
     }
 
     /** Repeats the reference pattern from {@code from} to {@code to} seconds of the song, on its beat grid when there is one. */

@@ -478,6 +478,8 @@ public class EditingActivity extends AppCompatActivityImpl {
 
                 // Look at each clip and keep only its good parts (no black / white screens, title cards, green screen).
                 final float[] look = {0f, 0f, 0f}; // brightness sum, saturation sum, count
+                final float[] colorSrc = {0f, 0f, 0f, 0f}; // Y, C, R/B sums, count
+                final float[][] refColor = {null};
                 for (int v = 0; v < videos.size(); v++) {
                     com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Source src = videos.get(v);
                     final int idx = v + 1;
@@ -491,6 +493,8 @@ public class EditingActivity extends AppCompatActivityImpl {
                         src.rangeLight = com.vanvatcorporation.doubleclips.ai.SourceScanner.rangeLight(sf, src.goodRanges);
                         float[] l = com.vanvatcorporation.doubleclips.ai.SourceScanner.averageLook(sf, src.goodRanges);
                         look[0] += l[0]; look[1] += l[1]; look[2] += 1;
+                        float[] cs = com.vanvatcorporation.doubleclips.ai.SourceScanner.colorStats(sf, src.goodRanges);
+                        if (cs != null) { colorSrc[0] += cs[0]; colorSrc[1] += cs[1]; colorSrc[2] += cs[2]; colorSrc[3] += 1; }
                     } catch (Exception ignored) {
                         // can't look at it: the whole clip is used
                     }
@@ -561,6 +565,7 @@ public class EditingActivity extends AppCompatActivityImpl {
                     com.vanvatcorporation.doubleclips.ai.ReferenceAnalyzer.Pattern pattern =
                             com.vanvatcorporation.doubleclips.ai.ReferenceAnalyzer.analyze(frames);
                     lastPattern[0] = pattern;
+                    refColor[0] = com.vanvatcorporation.doubleclips.ai.SourceScanner.colorStats(frames, null);
                     com.vanvatcorporation.doubleclips.ai.BeatDetector.Result refBeats = null;
                     try {
                         com.vanvatcorporation.doubleclips.ai.AudioPcmDecoder.Pcm refPcm =
@@ -585,9 +590,9 @@ public class EditingActivity extends AppCompatActivityImpl {
                 float intensity;
                 if (refFile != null) {
                     intensity = 1.3f;
-                    if (look[2] > 0 && lastPattern[0] != null)
-                        com.vanvatcorporation.doubleclips.ai.SourceScanner.matchLook(plan, lastPattern[0],
-                                new float[]{look[0] / look[2], look[1] / look[2]});
+                    if (colorSrc[3] > 0 && refColor[0] != null)
+                        com.vanvatcorporation.doubleclips.ai.SourceScanner.matchColor(plan, refColor[0],
+                                new float[]{colorSrc[0] / colorSrc[3], colorSrc[1] / colorSrc[3], colorSrc[2] / colorSrc[3]});
                 } else {
                     intensity = style == com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Style.HYPE ? 1.5f
                             : style == com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Style.BALANCED ? 1.0f : 0.4f;
@@ -689,8 +694,7 @@ public class EditingActivity extends AppCompatActivityImpl {
         v.valueScaleY = scale;
         v.valuePosX = c.videoProperties.valuePosX + dx;
         v.valuePosY = c.videoProperties.valuePosY + dy;
-        float light = shot.light == null ? 1f : shot.light[Math.min(i, shot.light.length - 1)];
-        v.valueBrightness = plan.brightness + Math.max(-0.45f, Math.min(0.45f, (light - 1f) * 0.35f));
+        v.valueBrightness = plan.brightness + com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.lightToBrightness(shot, i);
         Keyframe k = new Keyframe(local, v, EasingType.LINEAR);
         k.channels = new ArrayList<>();
         k.animate(VideoProperties.ValueType.ScaleX, true);
@@ -728,6 +732,7 @@ public class EditingActivity extends AppCompatActivityImpl {
             c.videoProperties.valueSpeed = shot.speed;
             c.videoProperties.valueSaturation = plan.saturation;
             c.videoProperties.valueBrightness = plan.brightness;
+            c.videoProperties.valueTemperature = plan.temperature;
             aiFitAndCamera(c, shot, plan);
             if (shot.effect != null) {
                 c.clipEffect = new EffectTemplate(shot.effect, 0, 0);
