@@ -355,6 +355,18 @@ public class EditingActivity extends AppCompatActivityImpl {
     private com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Style aiStyle =
             com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Style.HYPE;
 
+    /** Reference edit picked in "copy a reference" mode (null in the normal modes). */
+    private Uri aiReferenceUri = null;
+
+    private final ActivityResultLauncher<Intent> aiReferencePickerLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null || result.getData().getData() == null) return;
+                aiReferenceUri = result.getData().getData();
+                launchAiClipsPicker("Agora escolha seus clipes E a música");
+            }
+    );
+
     private final ActivityResultLauncher<Intent> aiPickerLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
             result -> {
@@ -366,7 +378,7 @@ public class EditingActivity extends AppCompatActivityImpl {
                 } else if (data.getData() != null) {
                     uris.add(data.getData());
                 }
-                if (!uris.isEmpty()) runAiCreate(uris);
+                if (!uris.isEmpty()) runAiCreate(uris, aiReferenceUri);
             }
     );
 
@@ -374,29 +386,43 @@ public class EditingActivity extends AppCompatActivityImpl {
         final String[] labels = {
                 "Hype (cortes rápidos + muitos efeitos)",
                 "Equilibrado (cortes no compasso)",
-                "Calmo (cenas longas, transições suaves)"};
-        final int[] chosen = {aiStyle.ordinal()};
+                "Calmo (cenas longas, transições suaves)",
+                "📼 Copiar uma edit de referência"};
+        final int[] chosen = {aiReferenceUri != null ? 3 : aiStyle.ordinal()};
         boolean hasClips = timeline != null && timeline.getAllClipCount() > 0;
         new AlertDialog.Builder(this)
                 .setTitle(hasClips ? "✨ Criar com IA (substitui a edição atual)" : "✨ Criar com IA")
                 .setSingleChoiceItems(labels, chosen[0], (d, which) -> chosen[0] = which)
-                .setPositiveButton("Escolher clipes + música", (d, w) -> {
-                    aiStyle = com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Style.values()[chosen[0]];
-                    Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-                    intent.setType("*/*");
-                    intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"video/*", "audio/*"});
-                    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-                    intent.addCategory(Intent.CATEGORY_OPENABLE);
-                    android.widget.Toast.makeText(this, "Selecione os vídeos E a música (segure para marcar vários)",
-                            android.widget.Toast.LENGTH_LONG).show();
-                    aiPickerLauncher.launch(Intent.createChooser(intent, "Clipes + música"));
+                .setPositiveButton("Continuar", (d, w) -> {
+                    if (chosen[0] == 3) {
+                        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                        intent.setType("video/*");
+                        intent.addCategory(Intent.CATEGORY_OPENABLE);
+                        android.widget.Toast.makeText(this, "Escolha a edit de referência (o vídeo que a IA vai copiar)",
+                                android.widget.Toast.LENGTH_LONG).show();
+                        aiReferencePickerLauncher.launch(Intent.createChooser(intent, "Edit de referência"));
+                    } else {
+                        aiReferenceUri = null;
+                        aiStyle = com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Style.values()[chosen[0]];
+                        launchAiClipsPicker("Selecione os vídeos E a música (segure para marcar vários)");
+                    }
                 })
                 .setNegativeButton(R.string.cancel, null)
                 .show();
     }
 
+    private void launchAiClipsPicker(String hint) {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"video/*", "audio/*"});
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        android.widget.Toast.makeText(this, hint, android.widget.Toast.LENGTH_LONG).show();
+        aiPickerLauncher.launch(Intent.createChooser(intent, "Clipes + música"));
+    }
+
     /** Copies the picked files into the project, finds the beats of the song, plans the edit and reopens the editor on it. */
-    private void runAiCreate(List<Uri> uris) {
+    private void runAiCreate(List<Uri> uris, Uri referenceUri) {
         final AlertDialog progress = new AlertDialog.Builder(this)
                 .setTitle("✨ Criando edit com IA")
                 .setMessage("Importando arquivos…")
@@ -446,19 +472,46 @@ public class EditingActivity extends AppCompatActivityImpl {
                 com.vanvatcorporation.doubleclips.ai.BeatDetector.Result beats =
                         com.vanvatcorporation.doubleclips.ai.BeatDetector.analyze(pcm.samples, pcm.sampleRate);
 
-                ui.post(() -> progress.setMessage(String.format(java.util.Locale.US,
-                        "Montando a edit (%.0f BPM, %d batidas)…", beats.bpm, beats.beats.length)));
                 float length = Math.min(musicDuration, 600f);
-                com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Plan plan =
-                        com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.plan(beats, length, videos, style, System.currentTimeMillis());
+                com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Plan plan;
+                if (referenceUri != null) {
+                    ui.post(() -> progress.setMessage("Estudando a edit de referência…"));
+                    java.io.File refFile = new java.io.File(getCacheDir(), "ai_reference_video");
+                    IOHelper.writeToFileAsRaw(this, refFile.getAbsolutePath(), IOHelper.readFromFileAsRaw(this, getContentResolver(), referenceUri));
+                    com.vanvatcorporation.doubleclips.ai.ReferenceAnalyzer.Frames frames =
+                            com.vanvatcorporation.doubleclips.ai.ReferenceFrameSampler.sample(refFile.getAbsolutePath(), 12f, 600f,
+                                    (done, total) -> ui.post(() -> progress.setMessage(
+                                            "Estudando a edit de referência… " + (100 * done / total) + "%")));
+                    com.vanvatcorporation.doubleclips.ai.ReferenceAnalyzer.Pattern pattern =
+                            com.vanvatcorporation.doubleclips.ai.ReferenceAnalyzer.analyze(frames);
+                    com.vanvatcorporation.doubleclips.ai.BeatDetector.Result refBeats = null;
+                    try {
+                        com.vanvatcorporation.doubleclips.ai.AudioPcmDecoder.Pcm refPcm =
+                                com.vanvatcorporation.doubleclips.ai.AudioPcmDecoder.decode(refFile.getAbsolutePath(), pattern.duration + 1f);
+                        refBeats = com.vanvatcorporation.doubleclips.ai.BeatDetector.analyze(refPcm.samples, refPcm.sampleRate);
+                    } catch (Exception noSound) {
+                        // a reference without sound: its timing is copied as it is
+                    }
+                    final int refCuts = pattern.shots.size();
+                    ui.post(() -> progress.setMessage("Copiando o estilo (" + refCuts + " cenas na referência)…"));
+                    plan = com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.planFromReference(pattern, refBeats, beats, length,
+                            videos, System.currentTimeMillis());
+                    //noinspection ResultOfMethodCallIgnored
+                    refFile.delete();
+                } else {
+                    ui.post(() -> progress.setMessage(String.format(java.util.Locale.US,
+                            "Montando a edit (%.0f BPM, %d batidas)…", beats.bpm, beats.beats.length)));
+                    plan = com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.plan(beats, length, videos, style, System.currentTimeMillis());
+                }
 
                 final String music = musicName;
                 final float musicLen = musicDuration;
+                final com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Plan finalPlan = plan;
                 ui.post(() -> {
                     try {
-                        aiApplyPlan(plan, videos, videoInfo, music, musicLen);
+                        aiApplyPlan(finalPlan, videos, videoInfo, music, musicLen);
                         progress.dismiss();
-                        android.widget.Toast.makeText(this, "Edit criada! " + plan.shots.size() + " cortes. Ajuste o que quiser.",
+                        android.widget.Toast.makeText(this, "Edit criada! " + finalPlan.shots.size() + " cortes. Ajuste o que quiser.",
                                 android.widget.Toast.LENGTH_LONG).show();
                         recreate();
                     } catch (Exception e) {

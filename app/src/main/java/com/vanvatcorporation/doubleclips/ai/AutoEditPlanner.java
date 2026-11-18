@@ -174,6 +174,201 @@ public final class AutoEditPlanner {
         return plan;
     }
 
+
+    // ================================ copy a reference edit ================================
+
+    /**
+     * Copies the cut rhythm, effects and transitions of a reference edit onto a new song and new clips.
+     *
+     * <p>If the song is the same one the reference uses (found by lining up their onset envelopes), the cuts land at
+     * the same moments of the song. Otherwise every cut keeps its place in the beat grid (e.g. "on the 3rd beat of the
+     * bar"), and the pattern repeats if the song is longer than the reference.</p>
+     *
+     * @param refAudio beats of the reference's own sound, or null when it has none
+     */
+    public static Plan planFromReference(ReferenceAnalyzer.Pattern ref, BeatDetector.Result refAudio,
+                                         BeatDetector.Result music, float songLength, List<Source> sources, long seed) {
+        Plan plan = new Plan();
+        plan.duration = songLength;
+        List<Source> usable = new ArrayList<>();
+        for (Source s : sources) if (s.duration >= 0.3f) usable.add(s);
+        if (usable.isEmpty() || songLength <= 0 || ref.shots.isEmpty()) return plan;
+        Random rnd = new Random(seed);
+
+        // ---- where each reference shot lands on the new song ----
+        List<Float> starts = new ArrayList<>();
+        List<ReferenceAnalyzer.RefShot> templates = new ArrayList<>();
+        float shift = refAudio == null ? Float.NaN : sameSongShift(refAudio, music);
+        boolean haveGrid = refAudio != null && refAudio.beats.length >= 4 && music.beats.length >= 4;
+
+        if (!Float.isNaN(shift)) {
+            // same song: same moments
+            for (ReferenceAnalyzer.RefShot rs : ref.shots) {
+                float t = rs.start + shift;
+                if (t >= 0 && t < songLength - 0.1f) { starts.add(t); templates.add(rs); }
+            }
+            if (starts.isEmpty() || starts.get(0) > 0.05f) { starts.add(0, 0f); templates.add(0, ref.shots.get(0)); }
+            // song continues after the reference: keep going with the pattern on the beat grid
+            float covered = ref.duration + shift;
+            if (covered < songLength - 0.5f) appendCycles(ref, refAudio, music, covered, songLength, haveGrid, starts, templates);
+        } else {
+            appendCycles(ref, refAudio, music, 0f, songLength, haveGrid, starts, templates);
+        }
+
+        // ---- shots ----
+        float[] cursor = new float[usable.size()];
+        for (int i = 0; i < usable.size(); i++) cursor[i] = rnd.nextFloat() * usable.get(i).duration * 0.3f;
+        int lastSource = -1;
+        for (int k = 0; k < starts.size(); k++) {
+            float start = starts.get(k);
+            float end = k + 1 < starts.size() ? starts.get(k + 1) : songLength;
+            if (end - start < 0.08f) continue;
+            ReferenceAnalyzer.RefShot tpl = templates.get(k);
+            float len = end - start;
+            int si = pickSource(usable, len, lastSource, rnd);
+            Source src = usable.get(si);
+            if (len > src.duration) {
+                float mid = start + src.duration * 0.95f;
+                starts.add(k + 1, mid);
+                templates.add(k + 1, tpl);
+                len = mid - start;
+            }
+            float offset = cursor[si];
+            if (offset + len > src.duration) offset = rnd.nextFloat() * Math.max(0, src.duration - len);
+            cursor[si] = offset + len + rnd.nextFloat() * Math.min(2f, src.duration * 0.15f);
+            if (cursor[si] >= src.duration - 0.3f) cursor[si] = rnd.nextFloat() * src.duration * 0.2f;
+            lastSource = si;
+
+            Shot shot = new Shot();
+            shot.source = src.name;
+            shot.start = start;
+            shot.duration = len;
+            shot.sourceOffset = Math.max(0, offset);
+            shot.effect = tpl.effect;
+            shot.effectStrength = tpl.effectStrength;
+            if (tpl.transitionOut != null) {
+                shot.transitionOut = tpl.transitionOut;
+                shot.transitionDuration = Math.min(tpl.transitionDuration, len * 0.5f);
+            }
+            plan.shots.add(shot);
+        }
+        // a transition needs room on both sides
+        for (int k = 0; k + 1 < plan.shots.size(); k++) {
+            Shot a = plan.shots.get(k), b = plan.shots.get(k + 1);
+            if (a.transitionOut == null) continue;
+            a.transitionDuration = Math.min(a.transitionDuration, Math.min(a.duration, b.duration) * 0.5f);
+            if (a.transitionDuration < 0.1f) a.transitionOut = null;
+        }
+        if (!plan.shots.isEmpty()) plan.shots.get(plan.shots.size() - 1).transitionOut = null;
+        return plan;
+    }
+
+    /** Repeats the reference pattern from {@code from} to {@code to} seconds of the song, on its beat grid when there is one. */
+    private static void appendCycles(ReferenceAnalyzer.Pattern ref, BeatDetector.Result refAudio, BeatDetector.Result music,
+                                     float from, float to, boolean haveGrid, List<Float> starts,
+                                     List<ReferenceAnalyzer.RefShot> templates) {
+        if (haveGrid) {
+            float refLenBeats = toBeat(refAudio.beats, ref.duration);
+            if (refLenBeats < 1) refLenBeats = 1;
+            // start the pattern on a downbeat-ish point: the first beat at/after `from`
+            float base = (float) Math.ceil(toBeat(music.beats, from) - 0.05f);
+            float refFirst = toBeat(refAudio.beats, 0f);
+            for (int cycle = 0; cycle < 1000; cycle++) {
+                boolean any = false;
+                for (ReferenceAnalyzer.RefShot rs : ref.shots) {
+                    float beatPos = base + cycle * refLenBeats + (toBeat(refAudio.beats, rs.start) - refFirst);
+                    float t = fromBeat(music.beats, beatPos);
+                    if (cycle == 0 && rs == ref.shots.get(0)) t = from;
+                    if (t < from - 0.01f) continue;
+                    if (t >= to - 0.1f) return;
+                    starts.add(t);
+                    templates.add(rs);
+                    any = true;
+                }
+                if (!any) return;
+            }
+        } else {
+            // no rhythm to follow: same timing, stretched by nothing
+            for (int cycle = 0; cycle < 1000; cycle++) {
+                for (ReferenceAnalyzer.RefShot rs : ref.shots) {
+                    float t = from + cycle * ref.duration + rs.start;
+                    if (t >= to - 0.1f) return;
+                    starts.add(t);
+                    templates.add(rs);
+                }
+                if (ref.duration <= 0.1f) return;
+            }
+        }
+    }
+
+    /** Fractional beat number of time t (extrapolated outside the beats with the average period). */
+    static float toBeat(float[] beats, float t) {
+        int n = beats.length;
+        float period = (beats[n - 1] - beats[0]) / (n - 1);
+        if (t <= beats[0]) return (t - beats[0]) / period;
+        if (t >= beats[n - 1]) return (n - 1) + (t - beats[n - 1]) / period;
+        int lo = 0, hi = n - 1;
+        while (hi - lo > 1) { int mid = (lo + hi) >>> 1; if (beats[mid] <= t) lo = mid; else hi = mid; }
+        return lo + (t - beats[lo]) / (beats[hi] - beats[lo]);
+    }
+
+    /** Time of a fractional beat number (inverse of {@link #toBeat}). */
+    static float fromBeat(float[] beats, float b) {
+        int n = beats.length;
+        float period = (beats[n - 1] - beats[0]) / (n - 1);
+        if (b <= 0) return beats[0] + b * period;
+        if (b >= n - 1) return beats[n - 1] + (b - (n - 1)) * period;
+        int i = (int) Math.floor(b);
+        return beats[i] + (b - i) * (beats[i + 1] - beats[i]);
+    }
+
+    /**
+     * If the reference's sound and the new song are the same recording, returns how many seconds to add to a reference
+     * time to get the song time; NaN when they don't match.
+     */
+    static float sameSongShift(BeatDetector.Result ref, BeatDetector.Result song) {
+        float[] a = ref.onsetEnvelope, b = song.onsetEnvelope;
+        if (a.length < 50 || b.length < 50 || Math.abs(ref.envelopeRate - song.envelopeRate) > 0.5f) return Float.NaN;
+        // compare at ~1/4 resolution to keep it fast
+        float[] ra = downsample(a, 4), rb = downsample(b, 4);
+        zeroMean(ra); zeroMean(rb);
+        int maxLag = rb.length - Math.min(ra.length, rb.length) / 2;
+        int minLag = -ra.length / 2;
+        double best = 0;
+        int bestLag = 0;
+        for (int lag = minLag; lag <= maxLag; lag++) {
+            double s = 0, ea = 0, eb = 0;
+            int i0 = Math.max(0, -lag), i1 = Math.min(ra.length, rb.length - lag);
+            if (i1 - i0 < ra.length / 2) continue;
+            for (int i = i0; i < i1; i++) {
+                float x = ra[i], y = rb[i + lag];
+                s += x * y; ea += x * x; eb += y * y;
+            }
+            if (ea <= 0 || eb <= 0) continue;
+            double c = s / Math.sqrt(ea * eb);
+            if (c > best) { best = c; bestLag = lag; }
+        }
+        if (best < 0.45) return Float.NaN;
+        return bestLag * 4 / song.envelopeRate;
+    }
+
+    private static float[] downsample(float[] x, int k) {
+        float[] o = new float[x.length / k];
+        for (int i = 0; i < o.length; i++) {
+            float m = 0;
+            for (int j = 0; j < k; j++) m = Math.max(m, x[i * k + j]);
+            o[i] = m;
+        }
+        return o;
+    }
+
+    private static void zeroMean(float[] x) {
+        double s = 0;
+        for (float v : x) s += v;
+        float m = (float) (s / Math.max(1, x.length));
+        for (int i = 0; i < x.length; i++) x[i] -= m;
+    }
+
     // ------------------------------------------------------------------------------------------
 
     private static boolean previousHadEffect(Plan plan) {

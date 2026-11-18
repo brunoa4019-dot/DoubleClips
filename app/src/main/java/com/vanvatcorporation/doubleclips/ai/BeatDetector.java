@@ -26,6 +26,10 @@ public final class BeatDetector {
         public float[] beatStrength = new float[0];
         /** Loudness around each beat, 0..1 (1 = the loudest part of the song), smoothed over ~2 bars. */
         public float[] beatEnergy = new float[0];
+        /** Onset envelope (0..1), one value per hop; used to line up two recordings of the same song. */
+        public float[] onsetEnvelope = new float[0];
+        /** Values of {@link #onsetEnvelope} per second. */
+        public float envelopeRate;
     }
 
     private BeatDetector() { }
@@ -79,6 +83,8 @@ public final class BeatDetector {
             env[f] = Math.max(0, onset[f] - mean);
         }
         normalize(env);
+        r.onsetEnvelope = env;
+        r.envelopeRate = frameRate;
 
         // ---- tempo ----
         float period = estimatePeriod(env, frameRate); // in frames
