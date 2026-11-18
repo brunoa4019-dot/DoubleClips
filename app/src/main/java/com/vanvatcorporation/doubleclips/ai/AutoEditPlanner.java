@@ -27,10 +27,96 @@ public final class AutoEditPlanner {
     public static final class Source {
         public final String name;
         public final float duration;
+        /** Usable parts [start, end] seconds (from {@link SourceScanner}); null = the whole clip. */
+        public float[][] goodRanges;
 
         public Source(String name, float duration) {
             this.name = name;
             this.duration = duration;
+        }
+
+        float[][] ranges() {
+            return goodRanges == null || goodRanges.length == 0 ? new float[][]{{0, duration}} : goodRanges;
+        }
+
+        float longest() {
+            float m = 0;
+            for (float[] r : ranges()) m = Math.max(m, r[1] - r[0]);
+            return m;
+        }
+    }
+
+    /**
+     * Chooses which clip and which part of it fills each shot: never the same clip twice in a row (when there are
+     * several), only usable parts, and moving forward through each part instead of repeating it.
+     */
+    static final class SourcePicker {
+        private final List<Source> sources;
+        private final Random rnd;
+        private final int[] rangeIdx;
+        private final float[] cursor;
+        private int last = -1;
+
+        SourcePicker(List<Source> sources, Random rnd) {
+            this.sources = sources;
+            this.rnd = rnd;
+            rangeIdx = new int[sources.size()];
+            cursor = new float[sources.size()];
+            for (int i = 0; i < sources.size(); i++) {
+                float[][] r = sources.get(i).ranges();
+                rangeIdx[i] = rnd.nextInt(r.length);
+                cursor[i] = r[rangeIdx[i]][0];
+            }
+        }
+
+        /** Longest piece any clip can give in one go. */
+        float maxPiece() {
+            float m = 0;
+            for (Source s : sources) m = Math.max(m, s.longest());
+            return m;
+        }
+
+        /** Fills shot.source / shot.sourceOffset for a shot of {@code len} seconds (len must be <= maxPiece()). */
+        void fill(Shot shot, float len) {
+            int n = sources.size();
+            int si = -1;
+            for (int tries = 0; tries < 12 && si < 0; tries++) {
+                int i = rnd.nextInt(n);
+                if (n > 1 && i == last) continue;
+                if (sources.get(i).longest() >= len) si = i;
+            }
+            if (si < 0) {
+                for (int i = 0; i < n; i++) {
+                    if (n > 1 && i == last && sources.size() > 1) continue;
+                    if (si < 0 || sources.get(i).longest() > sources.get(si).longest()) si = i;
+                }
+            }
+            if (si < 0) si = 0;
+            Source src = sources.get(si);
+            float[][] ranges = src.ranges();
+            // stay in the current part if the shot fits, else move to the next part that fits
+            float offset = -1;
+            for (int k = 0; k < ranges.length && offset < 0; k++) {
+                int ri = (rangeIdx[si] + k) % ranges.length;
+                float[] r = ranges[ri];
+                if (k == 0) {
+                    if (cursor[si] + len <= r[1] + 1e-3f) { offset = cursor[si]; rangeIdx[si] = ri; }
+                } else if (r[1] - r[0] >= len) {
+                    offset = r[0] + rnd.nextFloat() * Math.min(0.5f, r[1] - r[0] - len);
+                    rangeIdx[si] = ri;
+                }
+            }
+            if (offset < 0) offset = ranges[0][0];
+            float[] r = ranges[rangeIdx[si]];
+            float next = offset + len + rnd.nextFloat() * Math.min(1.5f, (r[1] - r[0]) * 0.2f);
+            if (next + 0.3f >= r[1]) {
+                rangeIdx[si] = (rangeIdx[si] + 1 + (ranges.length > 2 ? rnd.nextInt(ranges.length - 1) : 0)) % ranges.length;
+                next = ranges[rangeIdx[si]][0];
+            }
+            cursor[si] = next;
+            last = si;
+            shot.source = src.name;
+            shot.sourceOffset = Math.max(0, offset);
         }
     }
 
@@ -108,35 +194,24 @@ public final class AutoEditPlanner {
         }
         cuts.add(songLength);
 
-        // ---- sources: walk through each clip, never the same clip twice in a row ----
-        float[] cursor = new float[usable.size()];
-        for (int s = 0; s < usable.size(); s++) cursor[s] = rnd.nextFloat() * usable.get(s).duration * 0.3f;
-        int lastSource = -1;
+        // ---- sources ----
+        SourcePicker picker = new SourcePicker(usable, rnd);
+        float maxPiece = picker.maxPiece();
 
         float prevEnergy = energyAt(beats, 0);
         for (int c = 0; c + 1 < cuts.size(); c++) {
             float start = cuts.get(c), end = cuts.get(c + 1);
-            float len = end - start;
-            int si = pickSource(usable, len, lastSource, rnd);
-            Source src = usable.get(si);
-            if (len > src.duration) {
-                // the clip is shorter than the shot: split the shot in two
-                float mid = start + src.duration * 0.95f;
+            if (end - start > maxPiece) {
+                // no clip part is that long: split the shot
+                float mid = start + maxPiece * 0.95f;
                 cuts.add(c + 1, mid);
                 end = mid;
-                len = end - start;
             }
-            float offset = cursor[si];
-            if (offset + len > src.duration) offset = rnd.nextFloat() * Math.max(0, src.duration - len);
-            cursor[si] = offset + len + rnd.nextFloat() * Math.min(2f, src.duration * 0.15f);
-            if (cursor[si] >= src.duration - 0.3f) cursor[si] = rnd.nextFloat() * src.duration * 0.2f;
-            lastSource = si;
-
+            float len = end - start;
             Shot shot = new Shot();
-            shot.source = src.name;
             shot.start = start;
             shot.duration = len;
-            shot.sourceOffset = Math.max(0, offset);
+            picker.fill(shot, len);
 
             // ---- effects ----
             float strength = strengthAt(beats, start);
@@ -215,35 +290,33 @@ public final class AutoEditPlanner {
             appendCycles(ref, refAudio, music, 0f, songLength, haveGrid, starts, templates);
         }
 
+        // ---- drop cuts too close together (keeps the timeline gap-free) ----
+        for (int k = starts.size() - 1; k > 0; k--) {
+            float next = k + 1 < starts.size() ? starts.get(k + 1) : songLength;
+            if (next - starts.get(k) < 0.08f || starts.get(k) - starts.get(k - 1) < 0.08f) {
+                starts.remove(k);
+                templates.remove(k);
+            }
+        }
+
         // ---- shots ----
-        float[] cursor = new float[usable.size()];
-        for (int i = 0; i < usable.size(); i++) cursor[i] = rnd.nextFloat() * usable.get(i).duration * 0.3f;
-        int lastSource = -1;
+        SourcePicker picker = new SourcePicker(usable, rnd);
+        float maxPiece = picker.maxPiece();
         for (int k = 0; k < starts.size(); k++) {
             float start = starts.get(k);
             float end = k + 1 < starts.size() ? starts.get(k + 1) : songLength;
-            if (end - start < 0.08f) continue;
             ReferenceAnalyzer.RefShot tpl = templates.get(k);
-            float len = end - start;
-            int si = pickSource(usable, len, lastSource, rnd);
-            Source src = usable.get(si);
-            if (len > src.duration) {
-                float mid = start + src.duration * 0.95f;
+            if (end - start > maxPiece) {
+                float mid = start + maxPiece * 0.95f;
                 starts.add(k + 1, mid);
                 templates.add(k + 1, tpl);
-                len = mid - start;
+                end = mid;
             }
-            float offset = cursor[si];
-            if (offset + len > src.duration) offset = rnd.nextFloat() * Math.max(0, src.duration - len);
-            cursor[si] = offset + len + rnd.nextFloat() * Math.min(2f, src.duration * 0.15f);
-            if (cursor[si] >= src.duration - 0.3f) cursor[si] = rnd.nextFloat() * src.duration * 0.2f;
-            lastSource = si;
-
+            float len = end - start;
             Shot shot = new Shot();
-            shot.source = src.name;
             shot.start = start;
             shot.duration = len;
-            shot.sourceOffset = Math.max(0, offset);
+            picker.fill(shot, len);
             shot.effect = tpl.effect;
             shot.effectStrength = tpl.effectStrength;
             if (tpl.transitionOut != null) {
@@ -394,22 +467,6 @@ public final class AutoEditPlanner {
 
     private static float hitThreshold(Style style) {
         return style == Style.HYPE ? 0.6f : style == Style.BALANCED ? 0.78f : 0.92f;
-    }
-
-    private static int pickSource(List<Source> sources, float len, int last, Random rnd) {
-        int n = sources.size();
-        // prefer clips long enough for the whole shot
-        for (int tries = 0; tries < 8; tries++) {
-            int i = rnd.nextInt(n);
-            if (n > 1 && i == last) continue;
-            if (sources.get(i).duration >= len) return i;
-        }
-        int best = -1;
-        for (int i = 0; i < n; i++) {
-            if (n > 1 && i == last) continue;
-            if (best < 0 || sources.get(i).duration > sources.get(best).duration) best = i;
-        }
-        return best < 0 ? 0 : best;
     }
 
     private static int beatIndex(BeatDetector.Result r, float t) {

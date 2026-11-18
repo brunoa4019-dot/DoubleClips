@@ -465,4 +465,7 @@
     <string name="eia_new_project_sub">Start from scratch</string>
     <string name="eia_ai_create">✨ Create with AI</string>
     <string name="eia_ai_create_sub">Clips + music → ready edit</string>
+    <string name="eia_tool_ai">AI</string>
+    <string name="eia_tool_media">Media</string>
+    <string name="eia_tool_audio">Audio</string>
 </resources>

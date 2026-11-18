@@ -462,4 +462,7 @@
     <string name="eia_new_project_sub">Comece do zero</string>
     <string name="eia_ai_create">✨ Criar com IA</string>
     <string name="eia_ai_create_sub">Clipes + música → edit pronta</string>
+    <string name="eia_tool_ai">IA</string>
+    <string name="eia_tool_media">Mídia</string>
+    <string name="eia_tool_audio">Áudio</string>
 </resources>

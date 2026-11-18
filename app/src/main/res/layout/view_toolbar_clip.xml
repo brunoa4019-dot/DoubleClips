@@ -30,14 +30,6 @@
             android:textStyle="bold" />
         <!-- reuse rounded bg @drawable/bg_search_bar -->
 
-
-        <com.vanvatcorporation.doubleclips.impl.NavigationIconLayout
-            android:id="@+id/deleteMediaButton"
-            android:layout_width="64dp"
-            android:layout_height="match_parent"
-            app:navIcon="@drawable/baseline_delete_24"
-            app:navText="@string/delete" />
-
         <com.vanvatcorporation.doubleclips.impl.NavigationIconLayout
             android:id="@+id/splitMediaButton"
             android:layout_width="64dp"
@@ -136,5 +128,11 @@
             app:navIcon="@drawable/baseline_upload_file_24"
             app:navText="@string/export_3" />
 
+    <com.vanvatcorporation.doubleclips.impl.NavigationIconLayout
+            android:id="@+id/deleteMediaButton"
+            android:layout_width="64dp"
+            android:layout_height="match_parent"
+            app:navIcon="@drawable/baseline_delete_24"
+            app:navText="@string/delete" />
     </LinearLayout>
 </HorizontalScrollView>

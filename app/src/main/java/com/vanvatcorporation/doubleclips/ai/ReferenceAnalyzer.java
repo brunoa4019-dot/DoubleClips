@@ -24,7 +24,15 @@ public final class ReferenceAnalyzer {
         public float[] motion;
         /** Mean saturation 0..1. */
         public float[] saturation;
+        /** Standard deviation of luma 0..1 (low = flat picture: a blank, a fade); optional. */
+        public float[] contrast;
+        /** Fraction of strongly green pixels 0..1 (green screen); optional. */
+        public float[] green;
+        /** Tiny 8x8 RGB thumbnail per frame (192 values 0..1), the main cue for cuts; optional. */
+        public float[][] thumb;
     }
+
+    public static final int THUMB = 8;
 
     /** One shot of the reference, with what happens in it. */
     public static final class RefShot {
@@ -32,6 +40,8 @@ public final class ReferenceAnalyzer {
         /** Effect id to copy (flash / white-out / camera-shake / warp-zoom / ...) or null. */
         public String effect;
         public float effectStrength = 1f;
+        /** Mean picture change inside the shot (camera movement), 0..1. */
+        public float motion;
         /** Transition into the next shot, or null for a hard cut. */
         public String transitionOut;
         public float transitionDuration;
@@ -58,26 +68,24 @@ public final class ReferenceAnalyzer {
             return p;
         }
 
-        // histogram distance between neighbours (0..1)
+        // how different each frame is from the previous one (0..1): layout/colour (thumbnail) + tones (histogram)
         float[] d = new float[n];
-        for (int i = 1; i < n; i++) {
-            float s = 0;
-            for (int b = 0; b < HIST_BINS; b++) s += Math.abs(f.hist[i][b] - f.hist[i - 1][b]);
-            d[i] = s * 0.5f;
-        }
+        for (int i = 1; i < n; i++) d[i] = frameDistance(f, i - 1, i);
         float med = median(d), mad = median(absDev(d, med));
-        float cutThr = Math.max(0.28f, med + 6f * mad);
+        // fast edits move the camera a lot, so a cut is a clear peak above the motion around it
+        float cutThr = f.thumb != null ? Math.min(0.44f, Math.max(0.34f, med + 3f * mad)) : Math.max(0.28f, med + 5f * mad);
 
         // ---- cuts: a frame very different from the last one, not a single-frame flash ----
         boolean[] cut = new boolean[n];
-        int minGap = Math.max(1, Math.round(f.fps * 0.12f));
+        int minGap = Math.max(1, Math.round(f.fps * 0.25f));
         int last = -minGap;
         for (int i = 1; i < n; i++) {
             if (d[i] < cutThr || i - last < minGap) continue;
-            boolean localMax = (i + 1 >= n || d[i] >= d[i + 1]) && d[i] >= d[i - 1];
+            boolean localMax = true;
+            for (int k = Math.max(1, i - 2); k <= Math.min(n - 1, i + 2); k++) if (d[k] > d[i]) localMax = false;
             if (!localMax) continue;
             // a flash goes white and comes back: not a cut if the picture after the flash is the one from before it
-            if (isFlashFrame(f, i) && histDistance(f, i - 1, Math.min(n - 1, i + 2)) < cutThr) continue;
+            if (isFlashFrame(f, i) && frameDistance(f, i - 1, Math.min(n - 1, i + 2)) < cutThr) continue;
             cut[i] = true;
             last = i;
         }
@@ -106,15 +114,16 @@ public final class ReferenceAnalyzer {
             boolean flash = peak > 0.8f && peak - base > 0.25f;
             for (int i = a; i < b && !flash; i++) if (isFlashFrame(f, i)) flash = true;
 
-            // shake / zoom: lots of picture change inside the shot without a cut
+            // camera movement inside the shot (no cut): the edit moves the picture, copy it as zoom / shake
             float m = meanRange(f.motion, a + 1, b);
-            boolean shaky = m > Math.max(0.06f, motionMed * 2.2f) && (b - a) >= 3;
+            s.motion = m;
+            boolean shaky = (m > Math.max(0.06f, motionMed * 2.2f) || m > 0.045f) && (b - a) >= 3;
 
             if (flash) {
                 s.effect = peak > 0.93f ? "white-out" : "flash";
                 s.effectStrength = Math.min(2f, 0.8f + (peak - base) * 2f);
             } else if (shaky) {
-                s.effect = m > motionMed * 4f ? "camera-shake" : "warp-zoom";
+                s.effect = m > 0.16f ? "camera-shake" : (k % 3 == 2 ? "slow-push" : "warp-zoom");
                 s.effectStrength = Math.min(2.5f, 0.6f + m * 8f);
             }
             p.shots.add(s);
@@ -152,6 +161,16 @@ public final class ReferenceAnalyzer {
         float s = 0;
         for (int k = 0; k < HIST_BINS; k++) s += Math.abs(f.hist[a][k] - f.hist[b][k]);
         return s * 0.5f;
+    }
+
+    static float frameDistance(Frames f, int a, int b) {
+        float h = histDistance(f, a, b);
+        if (f.thumb == null) return h;
+        float[] x = f.thumb[a], y = f.thumb[b];
+        float t = 0;
+        for (int k = 0; k < x.length; k++) t += Math.abs(x[k] - y[k]);
+        t /= x.length;
+        return Math.min(1f, 0.35f * h + 0.65f * t * 2.5f);
     }
 
     private static float median(float[] x) {

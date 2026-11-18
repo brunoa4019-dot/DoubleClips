@@ -464,6 +464,22 @@ public class EditingActivity extends AppCompatActivityImpl {
                 }
                 if (videos.isEmpty()) throw new IllegalStateException("Nenhum vídeo foi escolhido.");
 
+                // Look at each clip and keep only its good parts (no black / white screens, title cards, green screen).
+                for (int v = 0; v < videos.size(); v++) {
+                    com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Source src = videos.get(v);
+                    final int idx = v + 1;
+                    try {
+                        String path = IOHelper.CombinePath(properties.getProjectPath(), Constants.DEFAULT_CLIP_DIRECTORY, src.name);
+                        com.vanvatcorporation.doubleclips.ai.ReferenceAnalyzer.Frames sf =
+                                com.vanvatcorporation.doubleclips.ai.ReferenceFrameSampler.sample(path, 6f, 900f,
+                                        (done, total) -> ui.post(() -> progress.setMessage(
+                                                "Assistindo os clipes (" + idx + "/" + videos.size() + ")… " + (100 * done / total) + "%")));
+                        src.goodRanges = com.vanvatcorporation.doubleclips.ai.SourceScanner.goodRanges(sf);
+                    } catch (Exception ignored) {
+                        // can't look at it: the whole clip is used
+                    }
+                }
+
                 // Reference mode: the reference video is needed now (its own song can be the music).
                 java.io.File refFile = null;
                 if (referenceUri != null) {
@@ -1767,6 +1783,25 @@ public class EditingActivity extends AppCompatActivityImpl {
 
 
         toolbarDefault.findViewById(R.id.pasteMediaButton).setOnClickListener(v -> handlePaste());
+
+        // Editor IA: CapCut-style shortcuts, no need to pick a track first
+        toolbarDefault.findViewById(R.id.quickAiButton).setOnClickListener(v -> showAiCreateDialog());
+        toolbarDefault.findViewById(R.id.quickMediaButton).setOnClickListener(v -> {
+            quickSelectTrack(false);
+            pickingContent();
+        });
+        toolbarDefault.findViewById(R.id.quickAudioButton).setOnClickListener(v -> {
+            quickSelectTrack(true);
+            pickingContent();
+        });
+        toolbarDefault.findViewById(R.id.quickTextButton).setOnClickListener(v -> {
+            quickSelectTrack(true);
+            toolbarTrack.findViewById(R.id.addTextButton).performClick();
+        });
+        toolbarDefault.findViewById(R.id.quickEffectButton).setOnClickListener(v -> {
+            quickSelectTrack(true);
+            toolbarTrack.findViewById(R.id.addEffectButton).performClick();
+        });
         toolbarDefault.findViewById(R.id.addTrackButton).setOnClickListener(v -> {
             Track track = addNewTrack();
             track.viewRef.trackInfo = track;
@@ -1853,7 +1888,7 @@ public class EditingActivity extends AppCompatActivityImpl {
 
 
             Clip newClip = new Clip("TEXT", currentTime, duration, selectedTrack.timelineIndex, type, false, 0, 0);
-            newClip.textContent = "Simple text";
+            newClip.textContent = "Seu texto";
             newClip.fontSize = 30;
             addClipToTrack(selectedTrack, newClip);
         });
@@ -5395,6 +5430,21 @@ public class EditingActivity extends AppCompatActivityImpl {
 
         if(timelineRenderer != null) timelineRenderer.refreshGizmo();
     }
+    /**
+     * Editor IA: picks the track a toolbar shortcut works on. Media goes to the first track; audio, text and effects go to a
+     * new layer on top (like CapCut), so nothing already in the edit is pushed around.
+     */
+    private void quickSelectTrack(boolean newLayer) {
+        Track target;
+        if (timeline.tracks.isEmpty() || newLayer) {
+            target = addNewTrack();
+            target.viewRef.trackInfo = target;
+        } else {
+            target = timeline.tracks.get(0);
+        }
+        if (selectedTrack != target) selectingTrack(target);
+    }
+
     private void selectingTrack(Track selectedTrack)
     {
         deselectingTrack();

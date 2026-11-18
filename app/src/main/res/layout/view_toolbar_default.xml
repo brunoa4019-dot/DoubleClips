@@ -17,6 +17,48 @@
         android:paddingHorizontal="4dp">
 
         <com.vanvatcorporation.doubleclips.impl.NavigationIconLayout
+            android:id="@+id/quickAiButton"
+            android:layout_width="64dp"
+            android:layout_height="match_parent"
+            app:navIcon="@drawable/round_auto_awesome_24"
+            app:navText="@string/eia_tool_ai" />
+
+        <com.vanvatcorporation.doubleclips.impl.NavigationIconLayout
+            android:id="@+id/quickMediaButton"
+            android:layout_width="64dp"
+            android:layout_height="match_parent"
+            app:navIcon="@drawable/eia_ic_media"
+            app:navText="@string/eia_tool_media" />
+
+        <com.vanvatcorporation.doubleclips.impl.NavigationIconLayout
+            android:id="@+id/quickAudioButton"
+            android:layout_width="64dp"
+            android:layout_height="match_parent"
+            app:navIcon="@drawable/eia_ic_music"
+            app:navText="@string/eia_tool_audio" />
+
+        <com.vanvatcorporation.doubleclips.impl.NavigationIconLayout
+            android:id="@+id/quickTextButton"
+            android:layout_width="64dp"
+            android:layout_height="match_parent"
+            app:navIcon="@drawable/eia_ic_text"
+            app:navText="@string/text" />
+
+        <com.vanvatcorporation.doubleclips.impl.NavigationIconLayout
+            android:id="@+id/quickEffectButton"
+            android:layout_width="64dp"
+            android:layout_height="match_parent"
+            app:navIcon="@drawable/eia_ic_effects"
+            app:navText="@string/effect" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="32dp"
+            android:layout_marginHorizontal="6dp"
+            android:alpha="0.25"
+            android:background="?android:attr/textColorSecondary" />
+
+        <com.vanvatcorporation.doubleclips.impl.NavigationIconLayout
             android:id="@+id/addTrackButton"
             android:layout_width="64dp"
             android:layout_height="match_parent"

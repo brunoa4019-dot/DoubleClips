@@ -34,6 +34,9 @@ public final class ReferenceFrameSampler {
             f.brightness = new float[n];
             f.motion = new float[n];
             f.saturation = new float[n];
+            f.contrast = new float[n];
+            f.green = new float[n];
+            f.thumb = new float[n][ReferenceAnalyzer.THUMB * ReferenceAnalyzer.THUMB * 3];
             int[] px = new int[W * H];
             float[] prevLuma = null;
             float[] luma = new float[W * H];
@@ -52,6 +55,9 @@ public final class ReferenceFrameSampler {
                         f.hist[i] = f.hist[i - 1].clone();
                         f.brightness[i] = f.brightness[i - 1];
                         f.saturation[i] = f.saturation[i - 1];
+                        f.contrast[i] = f.contrast[i - 1];
+                        f.green[i] = f.green[i - 1];
+                        f.thumb[i] = f.thumb[i - 1].clone();
                     }
                     continue;
                 }
@@ -59,20 +65,31 @@ public final class ReferenceFrameSampler {
                 if (bw * bh > px.length) { px = new int[bw * bh]; luma = new float[bw * bh]; prevLuma = null; }
                 bmp.getPixels(px, 0, bw, 0, 0, bw, bh);
                 int count = bw * bh;
-                float sumL = 0, sumS = 0;
+                float sumL = 0, sumS = 0, sumSq = 0;
+                int greenCount = 0;
                 float[] h = f.hist[i];
+                float[] th = f.thumb[i];
+                int T = ReferenceAnalyzer.THUMB;
+                float tw = (float) (T * T) / count;
                 for (int k = 0; k < count; k++) {
                     int c = px[k];
                     float rr = ((c >> 16) & 255) / 255f, gg = ((c >> 8) & 255) / 255f, bb = (c & 255) / 255f;
                     float l = 0.299f * rr + 0.587f * gg + 0.114f * bb;
                     luma[k] = l;
                     sumL += l;
+                    sumSq += l * l;
+                    if (gg > 0.45f && gg > rr * 1.4f && gg > bb * 1.4f) greenCount++;
+                    int ti = (((k / bw) * T / bh) * T + (k % bw) * T / bw) * 3;
+                    th[ti] += rr * tw; th[ti + 1] += gg * tw; th[ti + 2] += bb * tw;
                     float max = Math.max(rr, Math.max(gg, bb)), min = Math.min(rr, Math.min(gg, bb));
                     sumS += max <= 0 ? 0 : (max - min) / max;
                     h[Math.min(ReferenceAnalyzer.HIST_BINS - 1, (int) (l * ReferenceAnalyzer.HIST_BINS))] += 1f / count;
                 }
                 f.brightness[i] = sumL / count;
                 f.saturation[i] = sumS / count;
+                float meanL = sumL / count;
+                f.contrast[i] = (float) Math.sqrt(Math.max(0, sumSq / count - meanL * meanL));
+                f.green[i] = greenCount / (float) count;
                 if (prevLuma != null && prevLuma.length == count) {
                     float m = 0;
                     for (int k = 0; k < count; k++) m += Math.abs(luma[k] - prevLuma[k]);
