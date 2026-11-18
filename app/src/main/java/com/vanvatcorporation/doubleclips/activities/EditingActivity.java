@@ -363,7 +363,7 @@ public class EditingActivity extends AppCompatActivityImpl {
             result -> {
                 if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null || result.getData().getData() == null) return;
                 aiReferenceUri = result.getData().getData();
-                launchAiClipsPicker("Agora escolha seus clipes E a música");
+                launchAiClipsPicker("Agora escolha seus clipes (e uma música, ou nenhuma para usar a da referência)");
             }
     );
 
@@ -463,6 +463,26 @@ public class EditingActivity extends AppCompatActivityImpl {
                     }
                 }
                 if (videos.isEmpty()) throw new IllegalStateException("Nenhum vídeo foi escolhido.");
+
+                // Reference mode: the reference video is needed now (its own song can be the music).
+                java.io.File refFile = null;
+                if (referenceUri != null) {
+                    ui.post(() -> progress.setMessage("Copiando a edit de referência…"));
+                    refFile = new java.io.File(getCacheDir(), "ai_reference_video");
+                    IOHelper.writeToFileAsRaw(this, refFile.getAbsolutePath(), IOHelper.readFromFileAsRaw(this, getContentResolver(), referenceUri));
+                }
+                if (musicName == null && refFile != null) {
+                    // No song picked: use the reference's own music.
+                    ui.post(() -> progress.setMessage("Pegando a música da referência…"));
+                    String name = "musica_da_referencia.m4a";
+                    String out = IOHelper.CombinePath(properties.getProjectPath(), Constants.DEFAULT_CLIP_DIRECTORY, name);
+                    com.arthenica.ffmpegkit.FFmpegSession session = com.arthenica.ffmpegkit.FFmpegKit.execute(
+                            "-y -i \"" + refFile.getAbsolutePath() + "\" -vn -c:a aac -b:a 192k \"" + out + "\"");
+                    if (!com.arthenica.ffmpegkit.ReturnCode.isSuccess(session.getReturnCode()))
+                        throw new IllegalStateException("A edit de referência não tem som. Escolha também uma música.");
+                    musicName = name;
+                    musicDuration = aiMediaDuration(out);
+                }
                 if (musicName == null) throw new IllegalStateException("Escolha também uma música (arquivo de áudio).");
 
                 ui.post(() -> progress.setMessage("Ouvindo a música e achando as batidas…"));
@@ -474,10 +494,8 @@ public class EditingActivity extends AppCompatActivityImpl {
 
                 float length = Math.min(musicDuration, 600f);
                 com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Plan plan;
-                if (referenceUri != null) {
+                if (refFile != null) {
                     ui.post(() -> progress.setMessage("Estudando a edit de referência…"));
-                    java.io.File refFile = new java.io.File(getCacheDir(), "ai_reference_video");
-                    IOHelper.writeToFileAsRaw(this, refFile.getAbsolutePath(), IOHelper.readFromFileAsRaw(this, getContentResolver(), referenceUri));
                     com.vanvatcorporation.doubleclips.ai.ReferenceAnalyzer.Frames frames =
                             com.vanvatcorporation.doubleclips.ai.ReferenceFrameSampler.sample(refFile.getAbsolutePath(), 12f, 600f,
                                     (done, total) -> ui.post(() -> progress.setMessage(
