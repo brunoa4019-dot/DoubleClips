@@ -31,6 +31,16 @@
                 android:layout_height="30dp"
                 android:layout_alignParentEnd="true"
                 android:src="@drawable/baseline_play_circle_24"/>
+            <Button
+                android:id="@+id/aiCreateButton"
+                android:layout_width="wrap_content"
+                android:layout_height="30dp"
+                android:minHeight="0dp"
+                android:paddingTop="0dp"
+                android:paddingBottom="0dp"
+                android:layout_toStartOf="@id/exportButton"
+                android:textSize="12sp"
+                android:text="✨ IA"/>
             <ImageButton
                 android:id="@+id/backButton"
                 android:layout_width="30dp"
