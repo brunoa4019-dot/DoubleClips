@@ -30,6 +30,8 @@ public final class ReferenceAnalyzer {
         public float[] green;
         /** Tiny 8x8 RGB thumbnail per frame (192 values 0..1), the main cue for cuts; optional. */
         public float[][] thumb;
+        /** 64x64 grey picture per frame (0..1), to measure camera motion; optional. */
+        public float[][] luma;
     }
 
     public static final int THUMB = 8;
@@ -42,6 +44,14 @@ public final class ReferenceAnalyzer {
         public float effectStrength = 1f;
         /** Mean picture change inside the shot (camera movement), 0..1. */
         public float motion;
+        /**
+         * The camera work of the shot, sampled at the reference's frame rate from the shot start: zoom (1 = as at the start),
+         * pan x / y (fractions of the frame), and brightness relative to the shot's average (1 = average). Null if unknown.
+         */
+        public float[] camZoom, camX, camY, light;
+        public float camFps;
+        /** Average brightness of the shot 0..1 (to pick a source scene of the same mood). */
+        public float brightness;
         /** Transition into the next shot, or null for a hard cut. */
         public String transitionOut;
         public float transitionDuration;
@@ -126,6 +136,8 @@ public final class ReferenceAnalyzer {
                 s.effect = m > 0.16f ? "camera-shake" : "slow-push";
                 s.effectStrength = Math.min(2.5f, 0.6f + m * 8f);
             }
+            s.brightness = meanRange(f.brightness, a, b);
+            if (f.luma != null && f.luma.length >= b) measureCamera(f, s, a, b);
             p.shots.add(s);
         }
 
@@ -157,6 +169,33 @@ public final class ReferenceAnalyzer {
             else if (maxB > 0.95f && around < 0.8f && !"white-out".equals(p.shots.get(k + 1).effect)) { s.transitionOut = "fadewhite"; s.transitionDuration = 0.3f; }
         }
         return p;
+    }
+
+    /** Follows the camera through the shot: accumulated zoom and pan, plus the light curve. */
+    private static void measureCamera(Frames f, RefShot s, int a, int b) {
+        int len = b - a;
+        s.camFps = f.fps;
+        s.camZoom = new float[len];
+        s.camX = new float[len];
+        s.camY = new float[len];
+        s.light = new float[len];
+        float z = 1, x = 0, y = 0;
+        float avg = Math.max(0.02f, meanRange(f.brightness, a, b));
+        for (int i = 0; i < len; i++) {
+            if (i > 0) {
+                float[] la = f.luma[a + i - 1], lb = f.luma[a + i];
+                float[] m = la == null || lb == null ? new float[]{1, 0, 0} : MotionEstimator.estimate(la, lb);
+                z *= m[0];
+                x += m[1] * z;
+                y += m[2] * z;
+                // keep it inside what can be copied without showing borders
+                z = Math.max(0.7f, Math.min(1.8f, z));
+            }
+            s.camZoom[i] = z;
+            s.camX[i] = x;
+            s.camY[i] = y;
+            s.light[i] = f.brightness[a + i] / avg;
+        }
     }
 
     /** True when frame i is much brighter than both neighbours (a one or two frame white flash). */

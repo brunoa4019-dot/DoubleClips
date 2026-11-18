@@ -488,6 +488,7 @@ public class EditingActivity extends AppCompatActivityImpl {
                                         (done, total) -> ui.post(() -> progress.setMessage(
                                                 "Assistindo os clipes (" + idx + "/" + videos.size() + ")… " + (100 * done / total) + "%")));
                         src.goodRanges = com.vanvatcorporation.doubleclips.ai.SourceScanner.goodRanges(sf);
+                        src.rangeLight = com.vanvatcorporation.doubleclips.ai.SourceScanner.rangeLight(sf, src.goodRanges);
                         float[] l = com.vanvatcorporation.doubleclips.ai.SourceScanner.averageLook(sf, src.goodRanges);
                         look[0] += l[0]; look[1] += l[1]; look[2] += 1;
                     } catch (Exception ignored) {
@@ -538,13 +539,25 @@ public class EditingActivity extends AppCompatActivityImpl {
 
                 float length = Math.min(musicDuration, 600f);
                 final com.vanvatcorporation.doubleclips.ai.ReferenceAnalyzer.Pattern[] lastPattern = {null};
+                final int[] aiCanvas = {0, 0};
                 com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Plan plan;
                 if (refFile != null) {
                     ui.post(() -> progress.setMessage("Estudando a edit de referência…"));
                     com.vanvatcorporation.doubleclips.ai.ReferenceAnalyzer.Frames frames =
                             com.vanvatcorporation.doubleclips.ai.ReferenceFrameSampler.sample(refFile.getAbsolutePath(), 12f, 600f,
                                     (done, total) -> ui.post(() -> progress.setMessage(
-                                            "Estudando a edit de referência… " + (100 * done / total) + "%")));
+                                            "Estudando a edit de referência… " + (100 * done / total) + "%")), true);
+                    // the edit takes the reference's shape (vertical, square, wide)
+                    try {
+                        MediaMetadataRetriever rr = new MediaMetadataRetriever();
+                        rr.setDataSource(refFile.getAbsolutePath());
+                        int rw = Integer.parseInt(Objects.requireNonNull(rr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)));
+                        int rh = Integer.parseInt(Objects.requireNonNull(rr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)));
+                        String rot = rr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
+                        if ("90".equals(rot) || "270".equals(rot)) { int tmp = rw; rw = rh; rh = tmp; }
+                        rr.close();
+                        aiCanvas[0] = rw; aiCanvas[1] = rh;
+                    } catch (Exception ignored) { }
                     com.vanvatcorporation.doubleclips.ai.ReferenceAnalyzer.Pattern pattern =
                             com.vanvatcorporation.doubleclips.ai.ReferenceAnalyzer.analyze(frames);
                     lastPattern[0] = pattern;
@@ -579,7 +592,14 @@ public class EditingActivity extends AppCompatActivityImpl {
                     intensity = style == com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Style.HYPE ? 1.5f
                             : style == com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Style.BALANCED ? 1.0f : 0.4f;
                 }
-                com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.addFinishingTouches(plan, beats, intensity, System.nanoTime());
+                if (refFile != null) com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.snapToHits(plan, beats);
+                else com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.addFinishingTouches(plan, beats, intensity, System.nanoTime());
+                if (aiCanvas[0] > 0 && aiCanvas[1] > 0) {
+                    // keep ~1080 on the short side, even numbers
+                    float k = 1080f / Math.min(aiCanvas[0], aiCanvas[1]);
+                    settings.videoWidth = Math.round(aiCanvas[0] * k / 2f) * 2;
+                    settings.videoHeight = Math.round(aiCanvas[1] * k / 2f) * 2;
+                }
 
                 final String music = musicName;
                 final float musicLen = musicDuration;
@@ -628,6 +648,59 @@ public class EditingActivity extends AppCompatActivityImpl {
         }
     }
 
+    /**
+     * Editor IA: fills the canvas with the clip (cover, centred) and, when the shot carries camera work copied from a
+     * reference, animates zoom / pan / light with keyframes so the clip moves like the reference did.
+     */
+    private void aiFitAndCamera(Clip c, com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Shot shot,
+                                com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Plan plan) {
+        float W = settings.videoWidth, H = settings.videoHeight;
+        if (c.width <= 0 || c.height <= 0 || W <= 0 || H <= 0) return;
+        float cover = Math.max(W / c.width, H / c.height);
+        VideoProperties vp = c.videoProperties;
+        vp.valuePivotX = 0.5f;
+        vp.valuePivotY = 0.5f;
+        vp.valuePosX = (W - c.width) / 2f;
+        vp.valuePosY = (H - c.height) / 2f;
+        vp.valueScaleX = cover;
+        vp.valueScaleY = cover;
+        if (shot.camZoom == null || shot.camZoom.length < 2) return;
+
+        float minZ = 10f;
+        for (float z : shot.camZoom) minZ = Math.min(minZ, z);
+        float base = cover * 1.03f / Math.min(1f, minZ);
+        int n = shot.camZoom.length;
+        int step = Math.max(1, n / 24); // at most ~24 keyframes per shot
+        for (int i = 0; i < n; i += step) addAiKey(c, shot, plan, i, base, W, H);
+        if ((n - 1) % step != 0) addAiKey(c, shot, plan, n - 1, base, W, H);
+    }
+
+    private void addAiKey(Clip c, com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Shot shot,
+                          com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Plan plan, int i, float base, float W, float H) {
+        float local = i / shot.camFps;
+        if (local > c.duration) return;
+        VideoProperties v = new VideoProperties(c.videoProperties);
+        float scale = base * shot.camZoom[i];
+        float coverW = c.width * scale, coverH = c.height * scale;
+        float limX = Math.max(0, (coverW - W) / 2f), limY = Math.max(0, (coverH - H) / 2f);
+        float dx = Math.max(-limX, Math.min(limX, shot.camX[i] * W));
+        float dy = Math.max(-limY, Math.min(limY, shot.camY[i] * H));
+        v.valueScaleX = scale;
+        v.valueScaleY = scale;
+        v.valuePosX = c.videoProperties.valuePosX + dx;
+        v.valuePosY = c.videoProperties.valuePosY + dy;
+        float light = shot.light == null ? 1f : shot.light[Math.min(i, shot.light.length - 1)];
+        v.valueBrightness = plan.brightness + Math.max(-0.45f, Math.min(0.45f, (light - 1f) * 0.35f));
+        Keyframe k = new Keyframe(local, v, EasingType.LINEAR);
+        k.channels = new ArrayList<>();
+        k.animate(VideoProperties.ValueType.ScaleX, true);
+        k.animate(VideoProperties.ValueType.ScaleY, true);
+        k.animate(VideoProperties.ValueType.PosX, true);
+        k.animate(VideoProperties.ValueType.PosY, true);
+        k.animate(VideoProperties.ValueType.Brightness, true);
+        c.keyframes.keyframes.add(k);
+    }
+
     /** Replaces the project's timeline with the plan and saves it; the caller reopens the editor. */
     private void aiApplyPlan(com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Plan plan,
                              List<com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Source> videos,
@@ -655,6 +728,7 @@ public class EditingActivity extends AppCompatActivityImpl {
             c.videoProperties.valueSpeed = shot.speed;
             c.videoProperties.valueSaturation = plan.saturation;
             c.videoProperties.valueBrightness = plan.brightness;
+            aiFitAndCamera(c, shot, plan);
             if (shot.effect != null) {
                 c.clipEffect = new EffectTemplate(shot.effect, 0, 0);
                 c.clipEffect.params = new java.util.HashMap<>();

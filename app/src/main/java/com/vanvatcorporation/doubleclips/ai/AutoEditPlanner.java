@@ -29,6 +29,8 @@ public final class AutoEditPlanner {
         public final float duration;
         /** Usable parts [start, end] seconds (from {@link SourceScanner}); null = the whole clip. */
         public float[][] goodRanges;
+        /** Average brightness of each good range (same order), 0..1; optional. */
+        public float[] rangeLight;
 
         public Source(String name, float duration) {
             this.name = name;
@@ -53,20 +55,15 @@ public final class AutoEditPlanner {
     static final class SourcePicker {
         private final List<Source> sources;
         private final Random rnd;
-        private final int[] rangeIdx;
-        private final float[] cursor;
+        /** Per source, per range: how far into the range has been used already (seconds from the range start). */
+        private final float[][] used;
         private int last = -1;
 
         SourcePicker(List<Source> sources, Random rnd) {
             this.sources = sources;
             this.rnd = rnd;
-            rangeIdx = new int[sources.size()];
-            cursor = new float[sources.size()];
-            for (int i = 0; i < sources.size(); i++) {
-                float[][] r = sources.get(i).ranges();
-                rangeIdx[i] = rnd.nextInt(r.length);
-                cursor[i] = r[rangeIdx[i]][0];
-            }
+            used = new float[sources.size()][];
+            for (int i = 0; i < sources.size(); i++) used[i] = new float[sources.get(i).ranges().length];
         }
 
         /** Longest piece any clip can give in one go. */
@@ -76,45 +73,48 @@ public final class AutoEditPlanner {
             return m;
         }
 
-        /** Fills shot.source / shot.sourceOffset for a shot of {@code len} seconds (len must be <= maxPiece()). */
-        void fill(Shot shot, float len) {
-            int n = sources.size();
-            int si = -1;
-            for (int tries = 0; tries < 12 && si < 0; tries++) {
-                int i = rnd.nextInt(n);
-                if (n > 1 && i == last) continue;
-                if (sources.get(i).longest() >= len) si = i;
-            }
-            if (si < 0) {
-                for (int i = 0; i < n; i++) {
-                    if (n > 1 && i == last && sources.size() > 1) continue;
-                    if (si < 0 || sources.get(i).longest() > sources.get(si).longest()) si = i;
+        void fill(Shot shot, float len) { fill(shot, len, Float.NaN); }
+
+        /**
+         * Fills shot.source / shot.sourceOffset: footage not used yet first (no repeats while there is fresh footage), a
+         * scene whose brightness is close to {@code wantLight} when given, never the same clip twice in a row.
+         */
+        void fill(Shot shot, float len, float wantLight) {
+            int bestS = -1, bestR = -1;
+            double bestScore = Double.MAX_VALUE;
+            for (int si = 0; si < sources.size(); si++) {
+                Source src = sources.get(si);
+                float[][] r = src.ranges();
+                for (int ri = 0; ri < r.length; ri++) {
+                    float free = (r[ri][1] - r[ri][0]) - used[si][ri];
+                    if (free < len) continue;
+                    double score = rnd.nextDouble() * 0.15;
+                    if (!Float.isNaN(wantLight) && src.rangeLight != null && ri < src.rangeLight.length)
+                        score += Math.abs(src.rangeLight[ri] - wantLight) * 2.0;
+                    if (sources.size() > 1 && si == last) score += 0.5;
+                    score += used[si][ri] > 0 ? 0.08 : 0; // fresh scenes first
+                    if (score < bestScore) { bestScore = score; bestS = si; bestR = ri; }
                 }
             }
-            if (si < 0) si = 0;
-            Source src = sources.get(si);
-            float[][] ranges = src.ranges();
-            // stay in the current part if the shot fits, else move to the next part that fits
-            float offset = -1;
-            for (int k = 0; k < ranges.length && offset < 0; k++) {
-                int ri = (rangeIdx[si] + k) % ranges.length;
-                float[] r = ranges[ri];
-                if (k == 0) {
-                    if (cursor[si] + len <= r[1] + 1e-3f) { offset = cursor[si]; rangeIdx[si] = ri; }
-                } else if (r[1] - r[0] >= len) {
-                    offset = r[0] + rnd.nextFloat() * Math.min(0.5f, r[1] - r[0] - len);
-                    rangeIdx[si] = ri;
+            if (bestS < 0) {
+                // everything used: start over (repeats are unavoidable now), still matching the light
+                for (float[] u : used) java.util.Arrays.fill(u, 0f);
+                for (int si = 0; si < sources.size(); si++) {
+                    float[][] r = sources.get(si).ranges();
+                    for (int ri = 0; ri < r.length; ri++) {
+                        if (r[ri][1] - r[ri][0] < len) continue;
+                        double score = rnd.nextDouble();
+                        if (score < bestScore) { bestScore = score; bestS = si; bestR = ri; }
+                    }
                 }
             }
-            if (offset < 0) offset = ranges[0][0];
-            float[] r = ranges[rangeIdx[si]];
-            float next = offset + len + rnd.nextFloat() * Math.min(1.5f, (r[1] - r[0]) * 0.2f);
-            if (next + 0.3f >= r[1]) {
-                rangeIdx[si] = (rangeIdx[si] + 1 + (ranges.length > 2 ? rnd.nextInt(ranges.length - 1) : 0)) % ranges.length;
-                next = ranges[rangeIdx[si]][0];
-            }
-            cursor[si] = next;
-            last = si;
+            if (bestS < 0) { bestS = 0; bestR = 0; }
+            Source src = sources.get(bestS);
+            float[] r = src.ranges()[bestR];
+            float offset = r[0] + used[bestS][bestR];
+            if (offset + len > r[1]) offset = Math.max(r[0], r[1] - len);
+            used[bestS][bestR] = Math.min(r[1] - r[0], (offset - r[0]) + len + 0.15f);
+            last = bestS;
             shot.source = src.name;
             shot.sourceOffset = Math.max(0, offset);
         }
@@ -137,6 +137,9 @@ public final class AutoEditPlanner {
         public float transitionDuration;
         /** Playback speed (0.6 = slow motion, 1.3 = faster). The shot uses duration * speed seconds of its source. */
         public float speed = 1f;
+        /** Camera work copied from the reference (see ReferenceAnalyzer.RefShot), sampled at camFps over the shot; or null. */
+        public float[] camZoom, camX, camY, light;
+        public float camFps;
     }
 
     /** A short hit on the beat, drawn by an effect clip on a layer above the shots (affects the whole picture). */
@@ -162,6 +165,26 @@ public final class AutoEditPlanner {
      *
      * @param intensity 0 = none, 1 = normal, 1.5 = hype
      */
+    /** Reference mode: the reference already says what happens; only put the cuts exactly on the hits. */
+    public static void snapToHits(Plan plan, BeatDetector.Result music) {
+        for (int k = 1; k < plan.shots.size(); k++) {
+            Shot a = plan.shots.get(k - 1), s = plan.shots.get(k);
+            float hit = nearestOnset(music, s.start, 0.1f, 0.3f);
+            if (Float.isNaN(hit)) continue;
+            float delta = hit - s.start;
+            if (a.duration + delta < 0.15f || s.duration - delta < 0.15f) continue;
+            a.duration += delta;
+            s.start = hit;
+            s.duration -= delta;
+        }
+        for (int k = 0; k + 1 < plan.shots.size(); k++) {
+            Shot a = plan.shots.get(k), n = plan.shots.get(k + 1);
+            if (a.transitionOut == null) continue;
+            a.transitionDuration = Math.min(a.transitionDuration, 2f * Math.min(a.duration, n.duration) * 0.45f);
+            if (a.transitionDuration < 0.16f) a.transitionOut = null;
+        }
+    }
+
     public static void addFinishingTouches(Plan plan, BeatDetector.Result music, float intensity, long seed) {
         if (plan.shots.isEmpty() || intensity <= 0) return;
         Random rnd = new Random(seed ^ 0x5DEECE66DL);
@@ -412,8 +435,12 @@ public final class AutoEditPlanner {
             Shot shot = new Shot();
             shot.start = start;
             shot.duration = len;
-            picker.fill(shot, len);
-            shot.effect = tpl.effect;
+            picker.fill(shot, len * 1f, tpl.camZoom != null ? tpl.brightness : Float.NaN);
+            if (tpl.camZoom != null) {
+                shot.camZoom = tpl.camZoom; shot.camX = tpl.camX; shot.camY = tpl.camY; shot.light = tpl.light;
+                shot.camFps = tpl.camFps * (tpl.end - tpl.start > 0.01f ? (tpl.end - tpl.start) / len : 1f) / 1f;
+            }
+            shot.effect = tpl.camZoom != null && !"white-out".equals(tpl.effect) && !"flash".equals(tpl.effect) ? null : tpl.effect;
             shot.effectStrength = tpl.effectStrength;
             if (tpl.transitionOut != null) {
                 shot.transitionOut = tpl.transitionOut;

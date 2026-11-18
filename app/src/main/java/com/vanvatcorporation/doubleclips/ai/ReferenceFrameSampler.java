@@ -19,6 +19,11 @@ public final class ReferenceFrameSampler {
     private ReferenceFrameSampler() { }
 
     public static ReferenceAnalyzer.Frames sample(String path, float fps, float maxSeconds, Progress progress) throws Exception {
+        return sample(path, fps, maxSeconds, progress, false);
+    }
+
+    /** @param keepLuma also keep each 64x64 grey frame (needed to measure the camera motion of a reference). */
+    public static ReferenceAnalyzer.Frames sample(String path, float fps, float maxSeconds, Progress progress, boolean keepLuma) throws Exception {
         MediaMetadataRetriever r = new MediaMetadataRetriever();
         try {
             r.setDataSource(path);
@@ -37,6 +42,7 @@ public final class ReferenceFrameSampler {
             f.contrast = new float[n];
             f.green = new float[n];
             f.thumb = new float[n][ReferenceAnalyzer.THUMB * ReferenceAnalyzer.THUMB * 3];
+            if (keepLuma) f.luma = new float[n][];
             int[] px = new int[W * H];
             float[] prevLuma = null;
             float[] luma = new float[W * H];
@@ -58,6 +64,7 @@ public final class ReferenceFrameSampler {
                         f.contrast[i] = f.contrast[i - 1];
                         f.green[i] = f.green[i - 1];
                         f.thumb[i] = f.thumb[i - 1].clone();
+                        if (f.luma != null) f.luma[i] = f.luma[i - 1];
                     }
                     continue;
                 }
@@ -95,6 +102,7 @@ public final class ReferenceFrameSampler {
                     for (int k = 0; k < count; k++) m += Math.abs(luma[k] - prevLuma[k]);
                     f.motion[i] = m / count;
                 }
+                if (f.luma != null && count == MotionEstimator.SIZE * MotionEstimator.SIZE) f.luma[i] = luma.clone();
                 if (prevLuma == null || prevLuma.length != count) prevLuma = new float[count];
                 System.arraycopy(luma, 0, prevLuma, 0, count);
                 bmp.recycle();

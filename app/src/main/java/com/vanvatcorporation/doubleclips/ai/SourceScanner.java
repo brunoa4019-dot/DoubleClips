@@ -55,6 +55,18 @@ public final class SourceScanner {
         return out.toArray(new float[0][]);
     }
 
+    /** Average brightness of each range. */
+    public static float[] rangeLight(ReferenceAnalyzer.Frames f, float[][] ranges) {
+        float[] out = new float[ranges.length];
+        for (int k = 0; k < ranges.length; k++) {
+            int a = Math.max(0, Math.round(ranges[k][0] * f.fps)), b = Math.min(f.brightness.length, Math.round(ranges[k][1] * f.fps));
+            float s = 0; int c = 0;
+            for (int i = a; i < b; i++) { s += f.brightness[i]; c++; }
+            out[k] = c == 0 ? 0.4f : s / c;
+        }
+        return out;
+    }
+
     /** Average {brightness, saturation} of the clip over its good ranges (whole clip when none). */
     public static float[] averageLook(ReferenceAnalyzer.Frames f, float[][] ranges) {
         double b = 0, sa = 0;
