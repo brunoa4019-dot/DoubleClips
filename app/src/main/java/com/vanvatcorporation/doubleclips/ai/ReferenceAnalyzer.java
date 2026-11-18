@@ -221,6 +221,40 @@ public final class ReferenceAnalyzer {
             s.camY[i] = y;
             s.light[i] = f.brightness[a + i] / avg;
         }
+        // Frame-to-frame estimates are noisy (fire, particles, blur): copied raw they make the picture shake for no
+        // reason. Keep only the smooth camera move: a quadratic curve through each track (start / speed / ease).
+        fitSmooth(s.camZoom, 1f);
+        fitSmooth(s.camX, 0f);
+        fitSmooth(s.camY, 0f);
+        // ignore moves too small to be intentional
+        float zr = 0, xr = 0, yr = 0;
+        for (int i = 0; i < len; i++) {
+            zr = Math.max(zr, Math.abs(s.camZoom[i] - 1f));
+            xr = Math.max(xr, Math.abs(s.camX[i]));
+            yr = Math.max(yr, Math.abs(s.camY[i]));
+        }
+        if (zr < 0.03f) java.util.Arrays.fill(s.camZoom, 1f);
+        if (xr < 0.025f) java.util.Arrays.fill(s.camX, 0f);
+        if (yr < 0.025f) java.util.Arrays.fill(s.camY, 0f);
+    }
+
+    /** Least-squares quadratic through v (x = index), starting exactly at {@code start}. In place. */
+    static void fitSmooth(float[] v, float start) {
+        int n = v.length;
+        if (n < 3) return;
+        // fit v - start = b*t + c*t^2 (t in 0..1)
+        double s11 = 0, s12 = 0, s22 = 0, r1 = 0, r2 = 0;
+        for (int i = 0; i < n; i++) {
+            double t = i / (double) (n - 1), y = v[i] - start;
+            s11 += t * t; s12 += t * t * t; s22 += t * t * t * t; r1 += t * y; r2 += t * t * y;
+        }
+        double det = s11 * s22 - s12 * s12;
+        if (Math.abs(det) < 1e-12) return;
+        double b = (r1 * s22 - r2 * s12) / det, c = (s11 * r2 - s12 * r1) / det;
+        for (int i = 0; i < n; i++) {
+            double t = i / (double) (n - 1);
+            v[i] = (float) (start + b * t + c * t * t);
+        }
     }
 
     /** Mean |horizontal| and |vertical| gradient of a 64x64 grey frame. */

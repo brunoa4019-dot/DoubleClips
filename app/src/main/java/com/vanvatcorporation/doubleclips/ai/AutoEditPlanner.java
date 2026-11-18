@@ -55,15 +55,23 @@ public final class AutoEditPlanner {
     static final class SourcePicker {
         private final List<Source> sources;
         private final Random rnd;
-        /** Per source, per range: how far into the range has been used already (seconds from the range start). */
-        private final float[][] used;
-        private int last = -1;
+        private final int[][] timesUsed, lastUsedAt;
+        private final float[][] lastOffset;
+        private int last = -1, shotIndex = 0;
 
         SourcePicker(List<Source> sources, Random rnd) {
             this.sources = sources;
             this.rnd = rnd;
-            used = new float[sources.size()][];
-            for (int i = 0; i < sources.size(); i++) used[i] = new float[sources.get(i).ranges().length];
+            timesUsed = new int[sources.size()][];
+            lastUsedAt = new int[sources.size()][];
+            lastOffset = new float[sources.size()][];
+            for (int i = 0; i < sources.size(); i++) {
+                int k = sources.get(i).ranges().length;
+                timesUsed[i] = new int[k];
+                lastUsedAt[i] = new int[k];
+                lastOffset[i] = new float[k];
+                java.util.Arrays.fill(lastUsedAt[i], -100);
+            }
         }
 
         /** Longest piece any clip can give in one go. */
@@ -80,40 +88,42 @@ public final class AutoEditPlanner {
          * scene whose brightness is close to {@code wantLight} when given, never the same clip twice in a row.
          */
         void fill(Shot shot, float len, float wantLight) {
+            shotIndex++;
             int bestS = -1, bestR = -1;
             double bestScore = Double.MAX_VALUE;
             for (int si = 0; si < sources.size(); si++) {
                 Source src = sources.get(si);
                 float[][] r = src.ranges();
                 for (int ri = 0; ri < r.length; ri++) {
-                    float free = (r[ri][1] - r[ri][0]) - used[si][ri];
-                    if (free < len) continue;
-                    double score = rnd.nextDouble() * 0.15;
+                    if (r[ri][1] - r[ri][0] < len) continue;
+                    double score = rnd.nextDouble() * 0.1;
+                    // the same scene again looks like a repeat even from another second of it
+                    int uses = timesUsed[si][ri];
+                    score += uses * 3.0;
+                    int ago = shotIndex - lastUsedAt[si][ri];
+                    if (uses > 0 && ago < 6) score += (6 - ago) * 2.0;
                     if (!Float.isNaN(wantLight) && src.rangeLight != null && ri < src.rangeLight.length)
                         score += Math.abs(src.rangeLight[ri] - wantLight) * 2.0;
                     if (sources.size() > 1 && si == last) score += 0.5;
-                    score += used[si][ri] > 0 ? 0.08 : 0; // fresh scenes first
                     if (score < bestScore) { bestScore = score; bestS = si; bestR = ri; }
-                }
-            }
-            if (bestS < 0) {
-                // everything used: start over (repeats are unavoidable now), still matching the light
-                for (float[] u : used) java.util.Arrays.fill(u, 0f);
-                for (int si = 0; si < sources.size(); si++) {
-                    float[][] r = sources.get(si).ranges();
-                    for (int ri = 0; ri < r.length; ri++) {
-                        if (r[ri][1] - r[ri][0] < len) continue;
-                        double score = rnd.nextDouble();
-                        if (score < bestScore) { bestScore = score; bestS = si; bestR = ri; }
-                    }
                 }
             }
             if (bestS < 0) { bestS = 0; bestR = 0; }
             Source src = sources.get(bestS);
             float[] r = src.ranges()[bestR];
-            float offset = r[0] + used[bestS][bestR];
-            if (offset + len > r[1]) offset = Math.max(r[0], r[1] - len);
-            used[bestS][bestR] = Math.min(r[1] - r[0], (offset - r[0]) + len + 0.15f);
+            float span = r[1] - r[0];
+            float offset;
+            if (timesUsed[bestS][bestR] == 0) {
+                offset = r[0];
+            } else {
+                // used before: take the part of the scene farthest from what was shown
+                float prev = lastOffset[bestS][bestR];
+                offset = (prev - r[0] > span / 2f) ? r[0] : r[1] - len;
+            }
+            offset = Math.max(r[0], Math.min(offset, r[1] - len));
+            timesUsed[bestS][bestR]++;
+            lastUsedAt[bestS][bestR] = shotIndex;
+            lastOffset[bestS][bestR] = offset;
             last = bestS;
             shot.source = src.name;
             shot.sourceOffset = Math.max(0, offset);
