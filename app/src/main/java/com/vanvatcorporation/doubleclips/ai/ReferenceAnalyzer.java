@@ -123,7 +123,7 @@ public final class ReferenceAnalyzer {
                 s.effect = peak > 0.93f ? "white-out" : "flash";
                 s.effectStrength = Math.min(2f, 0.8f + (peak - base) * 2f);
             } else if (shaky) {
-                s.effect = m > 0.16f ? "camera-shake" : (k % 3 == 2 ? "slow-push" : "warp-zoom");
+                s.effect = m > 0.16f ? "camera-shake" : "slow-push";
                 s.effectStrength = Math.min(2.5f, 0.6f + m * 8f);
             }
             p.shots.add(s);
@@ -135,8 +135,9 @@ public final class ReferenceAnalyzer {
             float before = meanRange(f.motion, c - 3, c), after = meanRange(f.motion, c + 1, c + 4);
             if (before > 0.11f && after > 0.11f) {
                 RefShot s = p.shots.get(k);
-                s.transitionOut = before + after > 0.32f ? "glitchblur" : "hblur";
-                s.transitionDuration = 0.22f;
+                // the camera flies through the cut: copy it as a zoom blur, or a whip when the picture slides
+                s.transitionOut = (k % 3 == 1) ? "whip-left" : "zoom-blur";
+                s.transitionDuration = 0.4f;
             }
         }
 

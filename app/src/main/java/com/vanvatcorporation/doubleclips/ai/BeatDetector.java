@@ -30,6 +30,9 @@ public final class BeatDetector {
         public float[] onsetEnvelope = new float[0];
         /** Values of {@link #onsetEnvelope} per second. */
         public float envelopeRate;
+        /** Exact moments of the hits you hear (drums, impacts), ascending, and how hard each is (0..1). */
+        public float[] onsets = new float[0];
+        public float[] onsetStrength = new float[0];
     }
 
     private BeatDetector() { }
@@ -85,6 +88,7 @@ public final class BeatDetector {
         normalize(env);
         r.onsetEnvelope = env;
         r.envelopeRate = frameRate;
+        pickOnsets(r, env, frameRate, sampleRate);
 
         // ---- tempo ----
         float period = estimatePeriod(env, frameRate); // in frames
@@ -113,6 +117,37 @@ public final class BeatDetector {
     }
 
     // ------------------------------------------------------------------------------------------
+
+    /** Peaks of the onset envelope that stand out from their surroundings: the hits. */
+    private static void pickOnsets(Result r, float[] env, float frameRate, int sampleRate) {
+        int w = Math.max(2, Math.round(frameRate * 0.07f));
+        int avgW = Math.max(4, Math.round(frameRate * 0.5f));
+        List<float[]> found = new ArrayList<>();
+        int last = -1000;
+        for (int i = 1; i + 1 < env.length; i++) {
+            float v = env[i];
+            if (v < 0.12f) continue;
+            boolean peak = true;
+            for (int k = Math.max(0, i - w); k <= Math.min(env.length - 1, i + w); k++) if (env[k] > v) { peak = false; break; }
+            if (!peak) continue;
+            double s = 0; int c = 0;
+            for (int k = Math.max(0, i - avgW); k <= Math.min(env.length - 1, i + avgW); k++) { s += env[k]; c++; }
+            if (v < (s / c) * 1.5 + 0.05) continue;
+            if (i - last < w) continue;
+            found.add(new float[]{(i * HOP + FRAME / 2f) / sampleRate, v});
+            last = i;
+        }
+        r.onsets = new float[found.size()];
+        r.onsetStrength = new float[found.size()];
+        for (int i = 0; i < found.size(); i++) { r.onsets[i] = found.get(i)[0]; r.onsetStrength[i] = found.get(i)[1]; }
+        // relative to the song's typical strong hit (90th percentile), so one huge hit doesn't flatten the rest
+        if (r.onsetStrength.length > 0) {
+            float[] sorted = r.onsetStrength.clone();
+            Arrays.sort(sorted);
+            float ref = Math.max(1e-6f, sorted[(int) Math.floor(0.9 * (sorted.length - 1))]);
+            for (int i = 0; i < r.onsetStrength.length; i++) r.onsetStrength[i] = Math.min(1f, r.onsetStrength[i] / ref);
+        }
+    }
 
     private static float estimatePeriod(float[] env, float frameRate) {
         int minLag = Math.max(2, Math.round(frameRate * 60f / 200f));

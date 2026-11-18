@@ -1,0 +1,128 @@
+{
+ "schema": 1,
+ "id": "zoom-blur",
+ "name": "Zoom Blur",
+ "description": "Editor IA: A rushes into the camera and blurs, hard cut in the middle (on the beat), B lands zoomed in and settles.",
+ "defaultDuration": 0.4,
+ "cut": 0.5,
+ "from": {
+  "channels": {
+   "scale": {
+    "kind": "knots",
+    "interp": "smooth",
+    "points": [
+     [
+      0,
+      1.0
+     ],
+     [
+      0.25,
+      1.07
+     ],
+     [
+      0.5,
+      1.55
+     ]
+    ]
+   },
+   "blur": {
+    "kind": "knots",
+    "interp": "smooth",
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      0.3,
+      0.004
+     ],
+     [
+      0.5,
+      0.022
+     ]
+    ]
+   },
+   "exposure": {
+    "kind": "knots",
+    "interp": "smooth",
+    "points": [
+     [
+      0,
+      1.0
+     ],
+     [
+      0.5,
+      1.18
+     ]
+    ]
+   },
+   "edgeFill": {
+    "kind": "constant",
+    "value": 1
+   }
+  }
+ },
+ "to": {
+  "channels": {
+   "scale": {
+    "kind": "knots",
+    "interp": "smooth",
+    "points": [
+     [
+      0.5,
+      1.45
+     ],
+     [
+      0.72,
+      1.06
+     ],
+     [
+      1,
+      1.0
+     ]
+    ]
+   },
+   "blur": {
+    "kind": "knots",
+    "interp": "smooth",
+    "points": [
+     [
+      0.5,
+      0.02
+     ],
+     [
+      0.7,
+      0.002
+     ],
+     [
+      1,
+      0
+     ]
+    ]
+   },
+   "exposure": {
+    "kind": "knots",
+    "interp": "smooth",
+    "points": [
+     [
+      0.5,
+      1.18
+     ],
+     [
+      0.72,
+      1.02
+     ],
+     [
+      1,
+      1.0
+     ]
+    ]
+   },
+   "edgeFill": {
+    "kind": "constant",
+    "value": 1
+   }
+  }
+ }
+}
