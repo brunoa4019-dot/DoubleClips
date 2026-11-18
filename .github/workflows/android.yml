@@ -29,7 +29,9 @@ jobs:
       run: chmod +x gradlew
 
     - name: Build debug APK
-      run: ./gradlew :app:assembleDebug --stacktrace
+      run: |
+        set -o pipefail
+        ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee build.log
 
     - name: Rename APK
       run: |
@@ -51,4 +53,13 @@ jobs:
         name: Build ${{ github.run_number }}
         body: APK de teste gerado automaticamente. Baixe o arquivo .apk abaixo e instale no celular.
         files: out/*.apk
+        prerelease: true
+
+    - name: Publish build log when it fails (so it can be read without the Actions page)
+      if: failure()
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: log-${{ github.run_number }}
+        name: Build log ${{ github.run_number }} (falhou)
+        files: build.log
         prerelease: true
