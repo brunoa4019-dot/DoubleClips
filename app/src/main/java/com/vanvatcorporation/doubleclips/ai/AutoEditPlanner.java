@@ -135,11 +135,80 @@ public final class AutoEditPlanner {
         /** Transition into the NEXT shot (assets/animations/transitions/&lt;id&gt;.json), or null for a hard cut. */
         public String transitionOut;
         public float transitionDuration;
+        /** Playback speed (0.6 = slow motion, 1.3 = faster). The shot uses duration * speed seconds of its source. */
+        public float speed = 1f;
+    }
+
+    /** A short hit on the beat, drawn by an effect clip on a layer above the shots (affects the whole picture). */
+    public static final class Impact {
+        public float time, duration;
+        public String effect;
+        public float strength = 1f;
     }
 
     public static final class Plan {
         public final List<Shot> shots = new ArrayList<>();
+        public final List<Impact> impacts = new ArrayList<>();
         public float duration;
+        /** Colour look to give every shot (filled by the caller when copying a reference): saturation x, brightness +. */
+        public float saturation = 1f, brightness = 0f;
+    }
+
+    // ================================ finishing touches ================================
+
+    /**
+     * Makes the edit feel alive on the music: hits on the strong beats (zoom pulse, shake, flash), slow motion on long
+     * calm shots, a little speed on very short ones.
+     *
+     * @param intensity 0 = none, 1 = normal, 1.5 = hype
+     */
+    public static void addFinishingTouches(Plan plan, BeatDetector.Result music, float intensity, long seed) {
+        if (plan.shots.isEmpty() || intensity <= 0) return;
+        Random rnd = new Random(seed ^ 0x5DEECE66DL);
+
+        // ---- speed ramps ----
+        for (Shot s : plan.shots) {
+            if (s.speed != 1f) continue;
+            float e = energyAt(music, s.start);
+            if (s.duration >= 1.4f && e < 0.75f) s.speed = s.duration >= 2.5f ? 0.6f : 0.75f;
+            else if (s.duration <= 0.35f && intensity >= 1f) s.speed = 1.25f;
+        }
+
+        // ---- beat hits ----
+        float[] b = music.beats;
+        if (b.length == 0) return;
+        float thr = intensity >= 1.4f ? 0.45f : intensity >= 1f ? 0.6f : 0.8f;
+        float last = -10f;
+        int k = 0;
+        for (int i = 0; i < b.length; i++) {
+            float t = b[i], st = music.beatStrength[i];
+            if (t >= plan.duration - 0.15f) break;
+            if (st < thr || t - last < 0.22f) continue;
+            // skip hits inside a transition (it already moves)
+            boolean inTransition = false;
+            for (Shot s : plan.shots) {
+                if (s.transitionOut == null) continue;
+                float end = s.start + s.duration;
+                if (Math.abs(t - end) < s.transitionDuration) { inTransition = true; break; }
+            }
+            if (inTransition) continue;
+            Impact im = new Impact();
+            im.time = Math.max(0, t - 0.02f);
+            boolean onCut = false;
+            for (Shot s : plan.shots) if (Math.abs(s.start - t) < 0.06f) { onCut = true; break; }
+            if (st > 0.9f) {
+                im.effect = onCut ? "flash" : "camera-shake";
+                im.duration = onCut ? 0.18f : 0.3f;
+                im.strength = 0.9f + 0.5f * intensity;
+            } else {
+                im.effect = (k++ % 3 == 2) ? "rgb-shift" : "beat-pulse";
+                im.duration = 0.22f;
+                im.strength = 0.7f + 0.4f * intensity * st;
+            }
+            im.duration = Math.min(im.duration, plan.duration - im.time);
+            plan.impacts.add(im);
+            last = t;
+        }
     }
 
     // Effects that read well on anime edits, by role.

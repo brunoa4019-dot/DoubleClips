@@ -129,6 +129,17 @@ public final class ReferenceAnalyzer {
             p.shots.add(s);
         }
 
+        // ---- whip / blur cuts: the picture is moving fast on both sides of the cut ----
+        for (int k = 0; k + 1 < p.shots.size(); k++) {
+            int c = Math.round(p.shots.get(k).end * f.fps);
+            float before = meanRange(f.motion, c - 3, c), after = meanRange(f.motion, c + 1, c + 4);
+            if (before > 0.11f && after > 0.11f) {
+                RefShot s = p.shots.get(k);
+                s.transitionOut = before + after > 0.32f ? "glitchblur" : "hblur";
+                s.transitionDuration = 0.22f;
+            }
+        }
+
         // ---- fades: brightness goes to black / white around a cut ----
         for (int k = 0; k + 1 < p.shots.size(); k++) {
             int cutFrame = Math.round(p.shots.get(k).end * f.fps);

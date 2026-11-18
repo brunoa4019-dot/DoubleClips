@@ -54,4 +54,27 @@ public final class SourceScanner {
         }
         return out.toArray(new float[0][]);
     }
+
+    /** Average {brightness, saturation} of the clip over its good ranges (whole clip when none). */
+    public static float[] averageLook(ReferenceAnalyzer.Frames f, float[][] ranges) {
+        double b = 0, sa = 0;
+        int c = 0;
+        for (int i = 0; i < f.brightness.length; i++) {
+            float t = i / f.fps;
+            boolean in = ranges == null || ranges.length == 0;
+            if (!in) for (float[] r : ranges) if (t >= r[0] && t <= r[1]) { in = true; break; }
+            if (!in) continue;
+            b += f.brightness[i];
+            sa += f.saturation == null ? 0 : f.saturation[i];
+            c++;
+        }
+        return c == 0 ? new float[]{0.4f, 0.3f} : new float[]{(float) (b / c), (float) (sa / c)};
+    }
+
+    /** Fills plan.saturation / plan.brightness so the clips take the reference's look (kept mild). */
+    public static void matchLook(AutoEditPlanner.Plan plan, ReferenceAnalyzer.Pattern ref, float[] sourceLook) {
+        float sat = sourceLook[1] < 0.03f ? 1f : ref.avgSaturation / sourceLook[1];
+        plan.saturation = Math.max(0.7f, Math.min(1.7f, sat));
+        plan.brightness = Math.max(-0.08f, Math.min(0.08f, (ref.avgBrightness - sourceLook[0]) * 0.4f));
+    }
 }

@@ -357,6 +357,8 @@ public class EditingActivity extends AppCompatActivityImpl {
 
     /** Reference edit picked in "copy a reference" mode (null in the normal modes). */
     private Uri aiReferenceUri = null;
+    /** "Slowed + reverb" for the picked song. */
+    private boolean aiSlowedReverb = false;
 
     private final ActivityResultLauncher<Intent> aiReferencePickerLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -390,10 +392,20 @@ public class EditingActivity extends AppCompatActivityImpl {
                 "📼 Copiar uma edit de referência"};
         final int[] chosen = {aiReferenceUri != null ? 3 : aiStyle.ordinal()};
         boolean hasClips = timeline != null && timeline.getAllClipCount() > 0;
+        final android.widget.CheckBox slowed = new android.widget.CheckBox(this);
+        slowed.setText("🎧 Slowed + reverb na música");
+        slowed.setChecked(aiSlowedReverb);
+        int pad = Math.round(20 * getResources().getDisplayMetrics().density);
+        slowed.setPadding(pad / 2, pad / 2, pad, pad / 2);
+        LinearLayout box = new LinearLayout(this);
+        box.setPadding(pad, 0, pad, 0);
+        box.addView(slowed);
         new AlertDialog.Builder(this)
                 .setTitle(hasClips ? "✨ Criar com IA (substitui a edição atual)" : "✨ Criar com IA")
                 .setSingleChoiceItems(labels, chosen[0], (d, which) -> chosen[0] = which)
+                .setView(box)
                 .setPositiveButton("Continuar", (d, w) -> {
+                    aiSlowedReverb = slowed.isChecked();
                     if (chosen[0] == 3) {
                         Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
                         intent.setType("video/*");
@@ -465,6 +477,7 @@ public class EditingActivity extends AppCompatActivityImpl {
                 if (videos.isEmpty()) throw new IllegalStateException("Nenhum vídeo foi escolhido.");
 
                 // Look at each clip and keep only its good parts (no black / white screens, title cards, green screen).
+                final float[] look = {0f, 0f, 0f}; // brightness sum, saturation sum, count
                 for (int v = 0; v < videos.size(); v++) {
                     com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Source src = videos.get(v);
                     final int idx = v + 1;
@@ -475,6 +488,8 @@ public class EditingActivity extends AppCompatActivityImpl {
                                         (done, total) -> ui.post(() -> progress.setMessage(
                                                 "Assistindo os clipes (" + idx + "/" + videos.size() + ")… " + (100 * done / total) + "%")));
                         src.goodRanges = com.vanvatcorporation.doubleclips.ai.SourceScanner.goodRanges(sf);
+                        float[] l = com.vanvatcorporation.doubleclips.ai.SourceScanner.averageLook(sf, src.goodRanges);
+                        look[0] += l[0]; look[1] += l[1]; look[2] += 1;
                     } catch (Exception ignored) {
                         // can't look at it: the whole clip is used
                     }
@@ -500,6 +515,19 @@ public class EditingActivity extends AppCompatActivityImpl {
                     musicDuration = aiMediaDuration(out);
                 }
                 if (musicName == null) throw new IllegalStateException("Escolha também uma música (arquivo de áudio).");
+                if (aiSlowedReverb && !musicName.equals("musica_da_referencia.m4a")) {
+                    ui.post(() -> progress.setMessage("Deixando a música slowed + reverb…"));
+                    String in = IOHelper.CombinePath(properties.getProjectPath(), Constants.DEFAULT_CLIP_DIRECTORY, musicName);
+                    String name = "slowed_reverb_" + System.currentTimeMillis() + ".m4a";
+                    String out = IOHelper.CombinePath(properties.getProjectPath(), Constants.DEFAULT_CLIP_DIRECTORY, name);
+                    com.arthenica.ffmpegkit.FFmpegSession session = com.arthenica.ffmpegkit.FFmpegKit.execute(
+                            "-y -i \"" + in + "\" -vn -af \"aresample=44100,asetrate=37485,aresample=44100,"
+                                    + "aecho=0.8:0.85:70|140|220:0.32|0.22|0.12\" -c:a aac -b:a 192k \"" + out + "\"");
+                    if (com.arthenica.ffmpegkit.ReturnCode.isSuccess(session.getReturnCode())) {
+                        musicName = name;
+                        musicDuration = aiMediaDuration(out);
+                    }
+                }
 
                 ui.post(() -> progress.setMessage("Ouvindo a música e achando as batidas…"));
                 String musicPath = IOHelper.CombinePath(properties.getProjectPath(), Constants.DEFAULT_CLIP_DIRECTORY, musicName);
@@ -509,6 +537,7 @@ public class EditingActivity extends AppCompatActivityImpl {
                         com.vanvatcorporation.doubleclips.ai.BeatDetector.analyze(pcm.samples, pcm.sampleRate);
 
                 float length = Math.min(musicDuration, 600f);
+                final com.vanvatcorporation.doubleclips.ai.ReferenceAnalyzer.Pattern[] lastPattern = {null};
                 com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Plan plan;
                 if (refFile != null) {
                     ui.post(() -> progress.setMessage("Estudando a edit de referência…"));
@@ -518,6 +547,7 @@ public class EditingActivity extends AppCompatActivityImpl {
                                             "Estudando a edit de referência… " + (100 * done / total) + "%")));
                     com.vanvatcorporation.doubleclips.ai.ReferenceAnalyzer.Pattern pattern =
                             com.vanvatcorporation.doubleclips.ai.ReferenceAnalyzer.analyze(frames);
+                    lastPattern[0] = pattern;
                     com.vanvatcorporation.doubleclips.ai.BeatDetector.Result refBeats = null;
                     try {
                         com.vanvatcorporation.doubleclips.ai.AudioPcmDecoder.Pcm refPcm =
@@ -537,6 +567,19 @@ public class EditingActivity extends AppCompatActivityImpl {
                             "Montando a edit (%.0f BPM, %d batidas)…", beats.bpm, beats.beats.length)));
                     plan = com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.plan(beats, length, videos, style, System.currentTimeMillis());
                 }
+
+                // Colour look of the reference, beat hits, speed ramps
+                float intensity;
+                if (refFile != null) {
+                    intensity = 1.3f;
+                    if (look[2] > 0 && lastPattern[0] != null)
+                        com.vanvatcorporation.doubleclips.ai.SourceScanner.matchLook(plan, lastPattern[0],
+                                new float[]{look[0] / look[2], look[1] / look[2]});
+                } else {
+                    intensity = style == com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Style.HYPE ? 1.5f
+                            : style == com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Style.BALANCED ? 1.0f : 0.4f;
+                }
+                com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.addFinishingTouches(plan, beats, intensity, System.nanoTime());
 
                 final String music = musicName;
                 final float musicLen = musicDuration;
@@ -607,8 +650,11 @@ public class EditingActivity extends AppCompatActivityImpl {
                     info != null && info[2] == 1, info == null ? 0 : info[0], info == null ? 0 : info[1]);
             c.duration = shot.duration;
             c.startClipTrim = shot.sourceOffset;
-            c.endClipTrim = Math.max(0f, srcLen - shot.sourceOffset - shot.duration);
+            c.endClipTrim = Math.max(0f, srcLen - shot.sourceOffset - shot.duration * shot.speed);
             c.isMute = true; // the song is the sound
+            c.videoProperties.valueSpeed = shot.speed;
+            c.videoProperties.valueSaturation = plan.saturation;
+            c.videoProperties.valueBrightness = plan.brightness;
             if (shot.effect != null) {
                 c.clipEffect = new EffectTemplate(shot.effect, 0, 0);
                 c.clipEffect.params = new java.util.HashMap<>();
@@ -628,6 +674,19 @@ public class EditingActivity extends AppCompatActivityImpl {
         song.duration = Math.min(musicDuration, plan.duration);
         song.endClipTrim = Math.max(0f, musicDuration - song.duration);
         musicTrack.addClip(song);
+
+        // Beat hits: short effect clips on a layer above the shots (an effect clip filters every layer below it).
+        if (!plan.impacts.isEmpty()) {
+            Track fxTrack = new Track();
+            t.addTrack(fxTrack);
+            for (com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Impact im : plan.impacts) {
+                Clip fx = new Clip("EFFECT", im.time, im.duration, fxTrack.timelineIndex, ClipType.EFFECT, false, 0, 0);
+                fx.effect = new EffectTemplate(im.effect, 0, 0);
+                fx.effect.params = new java.util.HashMap<>();
+                fx.effect.params.put("intensity", (double) im.strength);
+                fxTrack.addClip(fx);
+            }
+        }
 
         t.duration = plan.duration;
 
