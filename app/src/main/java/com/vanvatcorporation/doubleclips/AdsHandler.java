@@ -20,6 +20,9 @@ import com.vanvatcorporation.doubleclips.popups.AdsConsentPopup;
 
 public class AdsHandler {
 
+    /** Editor IA: anúncios desligados nesta versão. */
+    public static final boolean ADS_ENABLED = false;
+
     public static RewardedAd mRewardedAd;
     public static InterstitialAd mInterstitialAd;
     public static boolean wasPreviouslyShowingAds;
@@ -103,6 +106,7 @@ public class AdsHandler {
      * (cooldown has passed AND daily cap not reached).
      */
     public static boolean canShowRewardedAd(Context context) {
+        if (!ADS_ENABLED) return false;
         SharedPreferences prefs = getAdsPrefs(context);
         resetDailyCountersIfNeeded(prefs);
         if (!isCooldownOver(prefs))
@@ -116,6 +120,7 @@ public class AdsHandler {
      * (cooldown has passed AND daily cap not reached).
      */
     public static boolean canShowInterstitialAd(Context context) {
+        if (!ADS_ENABLED) return false;
         SharedPreferences prefs = getAdsPrefs(context);
         resetDailyCountersIfNeeded(prefs);
         if (!isCooldownOver(prefs))
@@ -127,6 +132,7 @@ public class AdsHandler {
     // ─── Ad loading ────────────────────────────────────────────────────────────
 
     public static void loadRewardedAds(Context context, Activity activity) {
+        if (!ADS_ENABLED) return;
         RewardedAd.load(context, "ca-app-pub-1708105276845874/6458040635", // Test:
                                                                            // ca-app-pub-3940256099942544/5224354917
                 new AdRequest.Builder().build(), new RewardedAdLoadCallback() {
@@ -146,6 +152,7 @@ public class AdsHandler {
     }
 
     public static void loadInterstitialAd(Context context, Activity activity) {
+        if (!ADS_ENABLED) return;
         InterstitialAd.load(context,
                 "ca-app-pub-1708105276845874/3681324746", // Test: ca-app-pub-3940256099942544/1033173712
                 new AdRequest.Builder().build(),
@@ -191,6 +198,7 @@ public class AdsHandler {
      * Always call {@link #canShowRewardedAd(Context)} first to check UI state.
      */
     public static void showRewardedAds(Context context, Activity activity, RewardedAd ad) {
+        if (!ADS_ENABLED) return;
         if (ad == null)
             return;
         if (!canShowRewardedAd(context))
@@ -207,6 +215,7 @@ public class AdsHandler {
      * Always call {@link #canShowInterstitialAd(Context)} first to check UI state.
      */
     public static void showInterstitialAds(Context context, Activity activity, InterstitialAd ad) {
+        if (!ADS_ENABLED) return;
         if (ad == null)
             return;
         if (!canShowInterstitialAd(context))
@@ -221,6 +230,7 @@ public class AdsHandler {
     // ─── Initialization / bulk loading ─────────────────────────────────────────
 
     public static void loadBothAds(Context context, Activity activity) {
+        if (!ADS_ENABLED) return;
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
         boolean adsAllowed = prefs.getBoolean("ads_popup", true);
         if (!adsAllowed)
@@ -231,6 +241,7 @@ public class AdsHandler {
     }
 
     public static void initializeAds(Context context, Activity activity) {
+        if (!ADS_ENABLED) return;
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
         boolean adsAllowed = prefs.getBoolean("ads_popup", true);
         if (!adsAllowed)
@@ -242,6 +253,7 @@ public class AdsHandler {
     // ─── Thank-you popup ───────────────────────────────────────────────────────
 
     public static void displayThanksForShowingAds(Context context) {
+        if (!ADS_ENABLED) return;
         if (wasPreviouslyShowingAds) {
             wasPreviouslyShowingAds = false;
             new AdsConsentPopup.AdsThanksLetterPopup(context);
