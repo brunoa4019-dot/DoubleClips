@@ -350,6 +350,211 @@ public class EditingActivity extends AppCompatActivityImpl {
         return (int) (centerOffset + time * pixelsPerSecond);
     }
 
+    // ================================ Editor IA: "Criar com IA" ================================
+
+    private com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Style aiStyle =
+            com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Style.HYPE;
+
+    private final ActivityResultLauncher<Intent> aiPickerLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) return;
+                Intent data = result.getData();
+                List<Uri> uris = new ArrayList<>();
+                if (data.getClipData() != null) {
+                    for (int i = 0; i < data.getClipData().getItemCount(); i++) uris.add(data.getClipData().getItemAt(i).getUri());
+                } else if (data.getData() != null) {
+                    uris.add(data.getData());
+                }
+                if (!uris.isEmpty()) runAiCreate(uris);
+            }
+    );
+
+    private void showAiCreateDialog() {
+        final String[] labels = {
+                "Hype (cortes rápidos + muitos efeitos)",
+                "Equilibrado (cortes no compasso)",
+                "Calmo (cenas longas, transições suaves)"};
+        final int[] chosen = {aiStyle.ordinal()};
+        boolean hasClips = timeline != null && timeline.getAllClipCount() > 0;
+        new AlertDialog.Builder(this)
+                .setTitle(hasClips ? "✨ Criar com IA (substitui a edição atual)" : "✨ Criar com IA")
+                .setSingleChoiceItems(labels, chosen[0], (d, which) -> chosen[0] = which)
+                .setPositiveButton("Escolher clipes + música", (d, w) -> {
+                    aiStyle = com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Style.values()[chosen[0]];
+                    Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.setType("*/*");
+                    intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"video/*", "audio/*"});
+                    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    android.widget.Toast.makeText(this, "Selecione os vídeos E a música (segure para marcar vários)",
+                            android.widget.Toast.LENGTH_LONG).show();
+                    aiPickerLauncher.launch(Intent.createChooser(intent, "Clipes + música"));
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    /** Copies the picked files into the project, finds the beats of the song, plans the edit and reopens the editor on it. */
+    private void runAiCreate(List<Uri> uris) {
+        final AlertDialog progress = new AlertDialog.Builder(this)
+                .setTitle("✨ Criando edit com IA")
+                .setMessage("Importando arquivos…")
+                .setCancelable(false)
+                .show();
+        final Handler ui = new Handler(Looper.getMainLooper());
+        final com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Style style = aiStyle;
+        new Thread(() -> {
+            try {
+                List<com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Source> videos = new ArrayList<>();
+                Map<String, int[]> videoInfo = new java.util.HashMap<>(); // name -> {width, height, hasAudio}
+                String musicName = null;
+                float musicDuration = 0;
+                for (int i = 0; i < uris.size(); i++) {
+                    Uri uri = uris.get(i);
+                    final int n = i + 1;
+                    ui.post(() -> progress.setMessage("Importando arquivos… " + n + "/" + uris.size()));
+                    String filename = getFileName(uri);
+                    String clipPath = IOHelper.CombinePath(properties.getProjectPath(), Constants.DEFAULT_CLIP_DIRECTORY, filename);
+                    IOHelper.writeToFileAsRaw(this, clipPath, IOHelper.readFromFileAsRaw(this, getContentResolver(), uri));
+                    MimeHelper.MimeType mime = MimeHelper.getMimeTypeFromUri(this, uri);
+                    float duration = aiMediaDuration(clipPath);
+                    if (duration <= 0) continue;
+                    if (mime.isAudio()) {
+                        if (duration > musicDuration) { musicName = filename; musicDuration = duration; }
+                    } else if (mime.isVideo()) {
+                        int w = 0, h = 0, audio = 0;
+                        try {
+                            MediaMetadataRetriever r = new MediaMetadataRetriever();
+                            r.setDataSource(clipPath);
+                            w = Integer.parseInt(Objects.requireNonNull(r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)));
+                            h = Integer.parseInt(Objects.requireNonNull(r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)));
+                            audio = "yes".equals(r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)) ? 1 : 0;
+                            r.close();
+                        } catch (Exception ignored) { }
+                        videos.add(new com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Source(filename, duration));
+                        videoInfo.put(filename, new int[]{w, h, audio});
+                    }
+                }
+                if (videos.isEmpty()) throw new IllegalStateException("Nenhum vídeo foi escolhido.");
+                if (musicName == null) throw new IllegalStateException("Escolha também uma música (arquivo de áudio).");
+
+                ui.post(() -> progress.setMessage("Ouvindo a música e achando as batidas…"));
+                String musicPath = IOHelper.CombinePath(properties.getProjectPath(), Constants.DEFAULT_CLIP_DIRECTORY, musicName);
+                com.vanvatcorporation.doubleclips.ai.AudioPcmDecoder.Pcm pcm =
+                        com.vanvatcorporation.doubleclips.ai.AudioPcmDecoder.decode(musicPath, Math.min(musicDuration, 600f) + 1f);
+                com.vanvatcorporation.doubleclips.ai.BeatDetector.Result beats =
+                        com.vanvatcorporation.doubleclips.ai.BeatDetector.analyze(pcm.samples, pcm.sampleRate);
+
+                ui.post(() -> progress.setMessage(String.format(java.util.Locale.US,
+                        "Montando a edit (%.0f BPM, %d batidas)…", beats.bpm, beats.beats.length)));
+                float length = Math.min(musicDuration, 600f);
+                com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Plan plan =
+                        com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.plan(beats, length, videos, style, System.currentTimeMillis());
+
+                final String music = musicName;
+                final float musicLen = musicDuration;
+                ui.post(() -> {
+                    try {
+                        aiApplyPlan(plan, videos, videoInfo, music, musicLen);
+                        progress.dismiss();
+                        android.widget.Toast.makeText(this, "Edit criada! " + plan.shots.size() + " cortes. Ajuste o que quiser.",
+                                android.widget.Toast.LENGTH_LONG).show();
+                        recreate();
+                    } catch (Exception e) {
+                        progress.dismiss();
+                        aiShowError(e);
+                    }
+                });
+            } catch (Exception e) {
+                ui.post(() -> { progress.dismiss(); aiShowError(e); });
+            }
+        }, "ai-create").start();
+    }
+
+    private void aiShowError(Exception e) {
+        LoggingManager.LogExceptionToNoteOverlay(this, e);
+        new AlertDialog.Builder(this)
+                .setTitle("Não deu para criar a edit")
+                .setMessage(e.getMessage() == null ? e.toString() : e.getMessage())
+                .setPositiveButton(R.string.ok, null)
+                .show();
+    }
+
+    private static float aiMediaDuration(String path) {
+        MediaExtractor extractor = new MediaExtractor();
+        try {
+            extractor.setDataSource(path);
+            float best = 0;
+            for (int i = 0; i < extractor.getTrackCount(); i++) {
+                MediaFormat f = extractor.getTrackFormat(i);
+                if (f.containsKey(MediaFormat.KEY_DURATION)) best = Math.max(best, f.getLong(MediaFormat.KEY_DURATION) / 1_000_000f);
+            }
+            return best;
+        } catch (Exception e) {
+            return 0;
+        } finally {
+            extractor.release();
+        }
+    }
+
+    /** Replaces the project's timeline with the plan and saves it; the caller reopens the editor. */
+    private void aiApplyPlan(com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Plan plan,
+                             List<com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Source> videos,
+                             Map<String, int[]> videoInfo, String musicName, float musicDuration) {
+        Map<String, Float> durations = new java.util.HashMap<>();
+        for (com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Source s : videos) durations.put(s.name, s.duration);
+
+        Timeline t = new Timeline();
+        Track videoTrack = new Track();
+        t.addTrack(videoTrack);
+        Track musicTrack = new Track();
+        t.addTrack(musicTrack);
+
+        Clip previous = null;
+        com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Shot previousShot = null;
+        for (com.vanvatcorporation.doubleclips.ai.AutoEditPlanner.Shot shot : plan.shots) {
+            float srcLen = durations.get(shot.source);
+            int[] info = videoInfo.get(shot.source);
+            Clip c = new Clip(shot.source, shot.start, srcLen, videoTrack.timelineIndex, ClipType.VIDEO,
+                    info != null && info[2] == 1, info == null ? 0 : info[0], info == null ? 0 : info[1]);
+            c.duration = shot.duration;
+            c.startClipTrim = shot.sourceOffset;
+            c.endClipTrim = Math.max(0f, srcLen - shot.sourceOffset - shot.duration);
+            c.isMute = true; // the song is the sound
+            if (shot.effect != null) {
+                c.clipEffect = new EffectTemplate(shot.effect, 0, 0);
+                c.clipEffect.params = new java.util.HashMap<>();
+                c.clipEffect.params.put("intensity", (double) shot.effectStrength);
+            }
+            videoTrack.addClip(c);
+            if (previous != null && previousShot.transitionOut != null) {
+                previous.endTransition = new TransitionClip(previous, c, previousShot.transitionDuration);
+                previous.endTransition.effect.style = previousShot.transitionOut;
+                previous.endTransitionEnabled = true;
+            }
+            previous = c;
+            previousShot = shot;
+        }
+
+        Clip song = new Clip(musicName, 0, musicDuration, musicTrack.timelineIndex, ClipType.AUDIO, true, 0, 0);
+        song.duration = Math.min(musicDuration, plan.duration);
+        song.endClipTrim = Math.max(0f, musicDuration - song.duration);
+        musicTrack.addClip(song);
+
+        t.duration = plan.duration;
+
+        // Clip effects and transitions are drawn by the OpenGL renderer.
+        settings.renderEngine = "opengl";
+
+        String json = GsonHelper.createExposeOnlyGson().toJson(t);
+        properties.setProjectTimestamp(new Date().getTime());
+        properties.setProjectDuration((long) (t.duration * 1000));
+        properties.savePropertiesAtProject(this);
+        settings.saveSettings(this, properties);
+        IOHelper.writeToFile(this, IOHelper.CombinePath(properties.getProjectPath(), Constants.DEFAULT_TIMELINE_FILENAME), json);
+    }
+
     private ActivityResultLauncher<Intent> filePickerLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
             result -> {
@@ -1212,6 +1417,9 @@ public class EditingActivity extends AppCompatActivityImpl {
         snapshotButton.setOnClickListener(v -> {
             captureSnapshot();
         });
+
+        View aiButton = findViewById(R.id.aiCreateButton);
+        if (aiButton != null) aiButton.setOnClickListener(v -> showAiCreateDialog());
 
 
         undoButton = findViewById(R.id.undoButton);

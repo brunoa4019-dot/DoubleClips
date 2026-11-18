@@ -78,6 +78,12 @@
                 android:layout_height="wrap_content"
                 android:layout_alignParentEnd="true"
                 android:text="@string/export"/>
+            <Button
+                android:id="@+id/aiCreateButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_toStartOf="@id/exportButton"
+                android:text="✨ IA"/>
             <ImageButton
                 android:id="@+id/backButton"
                 android:layout_width="50dp"
