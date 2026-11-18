@@ -56,6 +56,7 @@ public final class AppLanguage {
     /** Every language the app can show. */
     public static final List<Language> SUPPORTED = Collections.unmodifiableList(Arrays.asList(
             new Language("en", "English"),
+            new Language("pt", "Português"),
             new Language("vi", "Tiếng Việt")
     ));
 

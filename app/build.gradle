@@ -21,6 +21,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Instala ao lado do DoubleClips original, sem conflito
+            applicationIdSuffix ".ia"
+        }
         release {
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
