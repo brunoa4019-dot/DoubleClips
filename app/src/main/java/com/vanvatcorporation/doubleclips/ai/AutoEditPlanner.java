@@ -409,6 +409,9 @@ public final class AutoEditPlanner {
             appendCycles(ref, refAudio, music, 0f, songLength, haveGrid, starts, templates);
         }
 
+        // ---- lock the cuts to the impacts of the song ----
+        lockCutsToHits(starts, templates, music, songLength);
+
         // ---- drop cuts too close together (keeps the timeline gap-free) ----
         for (int k = starts.size() - 1; k > 0; k--) {
             float next = k + 1 < starts.size() ? starts.get(k + 1) : songLength;
@@ -457,6 +460,71 @@ public final class AutoEditPlanner {
         }
         if (!plan.shots.isEmpty()) plan.shots.get(plan.shots.size() - 1).transitionOut = null;
         return plan;
+    }
+
+    /**
+     * Every cut moves onto the strongest impact near it (up to 0.3 s away), and every big impact that has no cut near it
+     * gets one: the scene changes exactly on the hits you hear.
+     */
+    static void lockCutsToHits(List<Float> starts, List<ReferenceAnalyzer.RefShot> templates, BeatDetector.Result music, float songLength) {
+        if (music == null || music.onsets.length == 0) return;
+        // 1) move each cut onto the best hit around it
+        for (int k = 1; k < starts.size(); k++) {
+            float t = starts.get(k);
+            float best = Float.NaN;
+            double bestScore = -1;
+            for (int i = 0; i < music.onsets.length; i++) {
+                float d = Math.abs(music.onsets[i] - t);
+                // only real impacts count; a very close weak hit is still better than none
+                boolean impact = music.onsetStrength[i] >= 0.6f;
+                if (d > (impact ? 0.3f : 0.06f)) continue;
+                if (starts.contains(music.onsets[i])) continue;
+                double score = music.onsetStrength[i] - 1.5 * d + (impact ? 1.0 : 0.0); // impacts always win
+                if (score > bestScore) { bestScore = score; best = music.onsets[i]; }
+            }
+            if (Float.isNaN(best) || music.onsetStrength.length == 0) continue;
+            float prev = starts.get(k - 1), next = k + 1 < starts.size() ? starts.get(k + 1) : songLength;
+            if (best - prev >= 0.15f && next - best >= 0.15f) starts.set(k, best);
+        }
+        // 2) big impacts without a cut get one
+        for (int i = 0; i < music.onsets.length; i++) {
+            if (music.onsetStrength[i] < 0.95f) continue;
+            float t = music.onsets[i];
+            if (t < 0.3f || t > songLength - 0.3f) continue;
+            int k = 0;
+            while (k + 1 < starts.size() && starts.get(k + 1) <= t) k++;
+            float a = starts.get(k), b = k + 1 < starts.size() ? starts.get(k + 1) : songLength;
+            if (t - a < 0.3f || b - t < 0.3f) continue;
+            starts.add(k + 1, t);
+            templates.add(k + 1, sliceTemplate(templates.get(k), t - a));
+        }
+    }
+
+    /** The rest of a reference shot from {@code offset} seconds on (its camera continues from there). */
+    static ReferenceAnalyzer.RefShot sliceTemplate(ReferenceAnalyzer.RefShot tpl, float offset) {
+        ReferenceAnalyzer.RefShot r = new ReferenceAnalyzer.RefShot();
+        r.start = tpl.start + offset;
+        r.end = Math.max(r.start + 0.05f, tpl.end);
+        r.effect = null;
+        r.transitionOut = tpl.transitionOut;
+        r.transitionDuration = tpl.transitionDuration;
+        r.motion = tpl.motion;
+        r.brightness = tpl.brightness;
+        tpl.transitionOut = null;
+        if (tpl.camZoom != null) {
+            int from = Math.min(tpl.camZoom.length - 1, Math.max(0, Math.round(offset * tpl.camFps)));
+            int n = tpl.camZoom.length - from;
+            r.camFps = tpl.camFps;
+            r.camZoom = new float[n]; r.camX = new float[n]; r.camY = new float[n]; r.light = new float[n];
+            float z0 = tpl.camZoom[from], x0 = tpl.camX[from], y0 = tpl.camY[from];
+            for (int i = 0; i < n; i++) {
+                r.camZoom[i] = tpl.camZoom[from + i] / z0;
+                r.camX[i] = tpl.camX[from + i] - x0;
+                r.camY[i] = tpl.camY[from + i] - y0;
+                r.light[i] = tpl.light[from + i];
+            }
+        }
+        return r;
     }
 
     /** Repeats the reference pattern from {@code from} to {@code to} seconds of the song, on its beat grid when there is one. */
