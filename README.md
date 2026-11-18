@@ -1,3 +1,12 @@
+# Editor IA (fork do DoubleClips)
+
+Fork pessoal do [DoubleClips](https://github.com/vanvatcorporation/doubleclips) (GPL-3.0) com:
+- app em português
+- APK de teste gerado automaticamente em **Releases** a cada atualização
+- (em breve) botão **Criar com IA**: clipes + música → edit pronta e editável
+
+---
+
 <div style="display: flex; align-items: center; justify-content: space-between; font-family: sans-serif; padding: 10px;">
   <div style="flex: 1; padding-right: 20px;">
     <h1 style="margin: 0; font-size: 2em; color: #666;">OpenEditz (prev: DoubleClips)</h1>
