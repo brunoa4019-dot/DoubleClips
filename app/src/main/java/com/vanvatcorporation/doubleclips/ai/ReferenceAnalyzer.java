@@ -141,15 +141,20 @@ public final class ReferenceAnalyzer {
             p.shots.add(s);
         }
 
-        // ---- whip / blur cuts: the picture is moving fast on both sides of the cut ----
-        for (int k = 0; k + 1 < p.shots.size(); k++) {
-            int c = Math.round(p.shots.get(k).end * f.fps);
-            float before = meanRange(f.motion, c - 3, c), after = meanRange(f.motion, c + 1, c + 4);
-            if (before > 0.11f && after > 0.11f) {
-                RefShot s = p.shots.get(k);
-                // the camera flies through the cut: copy it as a zoom blur, or a whip when the picture slides
-                s.transitionOut = (k % 3 == 1) ? "whip-left" : "zoom-blur";
-                s.transitionDuration = 0.4f;
+        // ---- transitions: read the frames around every cut (blur, flash, direction of the movement) ----
+        if (f.luma != null) {
+            float[] sharp = new float[n];
+            for (int i = 0; i < n; i++) sharp[i] = f.luma[i] == null ? 0 : sharpness(f.luma[i]);
+            for (int k = 0; k + 1 < p.shots.size(); k++) detectTransition(f, p, k, sharp);
+        } else {
+            for (int k = 0; k + 1 < p.shots.size(); k++) {
+                int c = Math.round(p.shots.get(k).end * f.fps);
+                float before = meanRange(f.motion, c - 3, c), after = meanRange(f.motion, c + 1, c + 4);
+                if (before > 0.11f && after > 0.11f) {
+                    RefShot s = p.shots.get(k);
+                    s.transitionOut = "zoom-blur";
+                    s.transitionDuration = 0.3f;
+                }
             }
         }
 
@@ -196,6 +201,64 @@ public final class ReferenceAnalyzer {
             s.camY[i] = y;
             s.light[i] = f.brightness[a + i] / avg;
         }
+    }
+
+    /** Mean absolute Laplacian of a 64x64 grey frame: high = sharp, low = blurred. */
+    static float sharpness(float[] l) {
+        int n = MotionEstimator.SIZE;
+        double s = 0;
+        int c = 0;
+        for (int y = 1; y < n - 1; y++) {
+            for (int x = 1; x < n - 1; x++) {
+                int i = y * n + x;
+                s += Math.abs(4 * l[i] - l[i - 1] - l[i + 1] - l[i - n] - l[i + n]);
+                c++;
+            }
+        }
+        return (float) (s / c);
+    }
+
+    /**
+     * Looks at the frames just before and after the cut between shot k and k+1. Blurred frames around the cut = a blur
+     * transition; their span gives its length. A brightness peak = it flashes. Sideways movement = a whip (left/right),
+     * otherwise a zoom blur.
+     */
+    private static void detectTransition(Frames f, Pattern p, int k, float[] sharp) {
+        int n = sharp.length;
+        RefShot a = p.shots.get(k), b = p.shots.get(k + 1);
+        int cut = Math.round(b.start * f.fps);
+        int aStart = Math.round(a.start * f.fps), bEnd = Math.min(n, Math.round(b.end * f.fps));
+        float refA = medianRange(sharp, aStart, cut), refB = medianRange(sharp, cut, bEnd);
+        int maxSpan = Math.max(1, Math.round(f.fps * 0.35f));
+        int before = 0, after = 0;
+        for (int i = cut - 1; i >= Math.max(aStart, cut - maxSpan); i--) {
+            if (refA > 0 && sharp[i] < refA * 0.62f) before++; else break;
+        }
+        for (int i = cut; i < Math.min(bEnd, cut + maxSpan); i++) {
+            if (refB > 0 && sharp[i] < refB * 0.62f) after++; else break;
+        }
+        // brightness peak right at the cut
+        float lightAround = Math.max(medianRange(f.brightness, aStart, cut), medianRange(f.brightness, cut, bEnd));
+        float peak = 0;
+        for (int i = Math.max(0, cut - 2); i < Math.min(n, cut + 3); i++) peak = Math.max(peak, f.brightness[i]);
+        boolean flash = peak > lightAround * 1.3f && peak > 0.45f;
+        if (before + after < 2 && !flash) return; // a plain hard cut
+
+        // direction of the movement inside the blurred frames
+        float pan = 0, zoom = 0;
+        for (int i = Math.max(aStart + 1, cut - before - 1); i < Math.min(bEnd, cut + after + 1); i++) {
+            if (i == cut || f.luma[i - 1] == null || f.luma[i] == null) continue;
+            float[] m = MotionEstimator.estimate(f.luma[i - 1], f.luma[i]);
+            pan += m[1];
+            zoom += Math.abs(m[0] - 1f);
+        }
+        String style;
+        if (before + after < 2) style = "flash-blur";
+        else if (Math.abs(pan) > zoom * 1.2f && Math.abs(pan) > 0.04f) style = pan < 0 ? "whip-left" : "whip-right";
+        else style = flash ? "flash-blur" : "zoom-blur";
+        a.transitionOut = style;
+        float span = 2f * Math.max(Math.max(before, after), 1) + 1f;
+        a.transitionDuration = Math.max(0.12f, Math.min(0.6f, span / f.fps));
     }
 
     /** True when frame i is much brighter than both neighbours (a one or two frame white flash). */

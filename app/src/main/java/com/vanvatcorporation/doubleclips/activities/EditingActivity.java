@@ -544,7 +544,7 @@ public class EditingActivity extends AppCompatActivityImpl {
                 if (refFile != null) {
                     ui.post(() -> progress.setMessage("Estudando a edit de referência…"));
                     com.vanvatcorporation.doubleclips.ai.ReferenceAnalyzer.Frames frames =
-                            com.vanvatcorporation.doubleclips.ai.ReferenceFrameSampler.sample(refFile.getAbsolutePath(), 12f, 600f,
+                            com.vanvatcorporation.doubleclips.ai.ReferenceFrameSampler.sample(refFile.getAbsolutePath(), 24f, 600f,
                                     (done, total) -> ui.post(() -> progress.setMessage(
                                             "Estudando a edit de referência… " + (100 * done / total) + "%")), true);
                     // the edit takes the reference's shape (vertical, square, wide)

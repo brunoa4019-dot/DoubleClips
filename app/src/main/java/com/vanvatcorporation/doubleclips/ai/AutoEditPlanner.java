@@ -443,7 +443,8 @@ public final class AutoEditPlanner {
                 shot.camZoom = tpl.camZoom; shot.camX = tpl.camX; shot.camY = tpl.camY; shot.light = tpl.light;
                 shot.camFps = tpl.camFps * (tpl.end - tpl.start > 0.01f ? (tpl.end - tpl.start) / len : 1f) / 1f;
             }
-            shot.effect = tpl.camZoom != null && !"white-out".equals(tpl.effect) && !"flash".equals(tpl.effect) ? null : tpl.effect;
+            // with the light curve copied, the reference's flashes are already in it: no extra flash effect on top
+            shot.effect = tpl.camZoom != null ? null : tpl.effect;
             shot.effectStrength = tpl.effectStrength;
             if (tpl.transitionOut != null) {
                 shot.transitionOut = tpl.transitionOut;
