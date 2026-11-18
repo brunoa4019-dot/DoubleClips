@@ -7,7 +7,7 @@
     <!-- Base Colors -->
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    <color name="ios_blue">#007AFF</color>
+    <color name="ios_blue">#7B61FF</color>
     <color name="ios_yellow">#FFCC00</color>
     <!-- <color name="red">#FF3B30</color>  System Blue -->
     <color name="ios_gray_bg">#F2F2F7</color> <!-- System Grouped Background -->
@@ -72,13 +72,13 @@
     <!-- ============================================= -->
     
     <!-- Dark Theme - Primary Colors -->
-    <color name="md_theme_dark_primary">#0A84FF</color> <!-- iOS Dark Blue -->
+    <color name="md_theme_dark_primary">#8B73FF</color> <!-- iOS Dark Blue -->
     <color name="md_theme_dark_onPrimary">@color/white</color>
-    <color name="md_theme_dark_primaryContainer">#0040DD</color>
-    <color name="md_theme_dark_onPrimaryContainer">#D1E3FF</color>
+    <color name="md_theme_dark_primaryContainer">#3A2E7A</color>
+    <color name="md_theme_dark_onPrimaryContainer">#E6DEFF</color>
     
     <!-- Dark Theme - Secondary Colors -->
-    <color name="md_theme_dark_secondary">#64D2FF</color> <!-- iOS Dark Teal -->
+    <color name="md_theme_dark_secondary">#FF5FA2</color> <!-- iOS Dark Teal -->
     <color name="md_theme_dark_onSecondary">#00344A</color>
     <color name="md_theme_dark_secondaryContainer">#004D6B</color>
     <color name="md_theme_dark_onSecondaryContainer">#C2E8FF</color>
@@ -96,19 +96,19 @@
     <color name="md_theme_dark_onErrorContainer">#FFDAD6</color>
     
     <!-- Dark Theme - Background & Surface -->
-    <color name="md_theme_dark_background">#000000</color>
+    <color name="md_theme_dark_background">#0B0B0F</color>
     <color name="md_theme_dark_onBackground">@color/white</color>
-    <color name="md_theme_dark_surface">#000000</color>
+    <color name="md_theme_dark_surface">#0B0B0F</color>
     <color name="md_theme_dark_onSurface">@color/white</color>
-    <color name="md_theme_dark_surfaceVariant">#1C1C1E</color>
+    <color name="md_theme_dark_surfaceVariant">#1A1A22</color>
     <color name="md_theme_dark_onSurfaceVariant">#AEAeb2</color>
     
     <!-- Dark Theme - Surface Containers -->
     <color name="md_theme_dark_surfaceContainerLowest">#000000</color>
-    <color name="md_theme_dark_surfaceContainerLow">#1C1C1E</color>
-    <color name="md_theme_dark_surfaceContainer">#2C2C2E</color>
-    <color name="md_theme_dark_surfaceContainerHigh">#3A3A3C</color>
-    <color name="md_theme_dark_surfaceContainerHighest">#48484A</color>
+    <color name="md_theme_dark_surfaceContainerLow">#15151B</color>
+    <color name="md_theme_dark_surfaceContainer">#1E1E26</color>
+    <color name="md_theme_dark_surfaceContainerHigh">#282832</color>
+    <color name="md_theme_dark_surfaceContainerHighest">#33333F</color>
     
     <!-- Dark Theme - Outline -->
     <color name="md_theme_dark_outline">#8E8E93</color>
@@ -167,4 +167,9 @@
     <color name="ripple_light">#1F000000</color>
     <color name="ripple_dark">#1FFFFFFF</color>
     
+    <!-- Editor IA -->
+    <color name="eia_accent">#7B61FF</color>
+    <color name="eia_accent2">#FF5FA2</color>
+    <color name="eia_track_bg">#121218</color>
+    <color name="eia_track_selected">#22222C</color>
 </resources>

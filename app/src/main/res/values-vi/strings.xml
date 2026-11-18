@@ -435,4 +435,9 @@
     <string name="stats_load_failed">Không thể tải mẫu của bạn: %1$s</string>
     <string name="stats_none_posted">Bạn chưa đăng mẫu nào</string>
     <string name="stats_sign_in_prompt">Đăng nhập để xem hiệu quả các mẫu của bạn.</string>
+    <string name="eia_track_label">Track %1$d</string>
+    <string name="eia_new_project">New project</string>
+    <string name="eia_new_project_sub">Start from scratch</string>
+    <string name="eia_ai_create">✨ Create with AI</string>
+    <string name="eia_ai_create_sub">Clips + music → ready edit</string>
 </resources>

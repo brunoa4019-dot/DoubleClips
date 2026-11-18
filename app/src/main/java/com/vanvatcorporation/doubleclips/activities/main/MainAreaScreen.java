@@ -122,6 +122,14 @@ public class MainAreaScreen extends BaseAreaScreen {
             return true;
         });
 
+        View aiCard = findViewById(R.id.aiCreateCard);
+        if (aiCard != null) aiCard.setOnClickListener(v -> {
+            openAiOnNextProject = true;
+            String stamp = new java.text.SimpleDateFormat("dd-MM_HH'h'mm'm'ss", java.util.Locale.getDefault()).format(new Date());
+            addNewProjectWithName("Edit_IA_" + stamp);
+            openAiOnNextProject = false;
+        });
+
         addNewProjectButton.setOnClickListener(v -> {
             // Two-step bottom-sheet: Option Picker → Name Form (with slide animation)
             android.app.Dialog dialog = new android.app.Dialog(getContext(),
@@ -202,6 +210,9 @@ public class MainAreaScreen extends BaseAreaScreen {
 
     }
 
+    /** Editor IA: the next project opened by addNewProjectWithName starts with the "Criar com IA" dialog. */
+    private boolean openAiOnNextProject = false;
+
     public void addNewProject() {
         String projectPath = IOHelper.getNextIndexPathInFolder(getContext(),
                 Constants.DEFAULT_PROJECT_DIRECTORY(getContext()), "project_", "", false);
@@ -232,7 +243,14 @@ public class MainAreaScreen extends BaseAreaScreen {
                 previewDir.mkdirs();
 
             applySortAndRefresh();
-            enterEditing(getContext(), data);
+            if (openAiOnNextProject) {
+                Intent intent = new Intent(getContext(), EditingActivity.class);
+                intent.putExtra("ProjectProperties", data);
+                intent.putExtra("openAi", true);
+                getContext().startActivity(intent);
+            } else {
+                enterEditing(getContext(), data);
+            }
         }
     }
 

@@ -460,4 +460,9 @@
     <string name="stats_load_failed">Couldn\'t load your templates: %1$s</string>
     <string name="stats_none_posted">You haven\'t posted a template yet</string>
     <string name="stats_sign_in_prompt">Sign in to see how your templates perform.</string>
+    <string name="eia_track_label">Track %1$d</string>
+    <string name="eia_new_project">New project</string>
+    <string name="eia_new_project_sub">Start from scratch</string>
+    <string name="eia_ai_create">✨ Create with AI</string>
+    <string name="eia_ai_create_sub">Clips + music → ready edit</string>
 </resources>

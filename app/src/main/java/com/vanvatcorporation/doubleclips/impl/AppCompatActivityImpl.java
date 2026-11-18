@@ -60,7 +60,7 @@ public class AppCompatActivityImpl extends AppCompatActivity {
         AppLanguage.applyToApplication(this); // services, notifications and toasts read the application's resources
 
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
-        String theme = prefs.getString("theme_mode", "system");
+        String theme = prefs.getString("theme_mode", "dark");
 
         switch (theme) {
             case "dark":

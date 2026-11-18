@@ -457,4 +457,9 @@
     <string name="stats_load_failed">Não foi possível carregar seus templates: %1$s</string>
     <string name="stats_none_posted">Você ainda não publicou nenhum template</string>
     <string name="stats_sign_in_prompt">Entre para ver o desempenho dos seus templates.</string>
+    <string name="eia_track_label">Trilha %1$d</string>
+    <string name="eia_new_project">Novo projeto</string>
+    <string name="eia_new_project_sub">Comece do zero</string>
+    <string name="eia_ai_create">✨ Criar com IA</string>
+    <string name="eia_ai_create_sub">Clipes + música → edit pronta</string>
 </resources>

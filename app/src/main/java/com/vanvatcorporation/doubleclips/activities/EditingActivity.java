@@ -1609,6 +1609,12 @@ public class EditingActivity extends AppCompatActivityImpl {
 
             // Regenerate timeline renderer when timeline finishes loading.
             regeneratingTimelineRenderer();
+
+            // Editor IA: came from the home screen's "Criar com IA" card
+            if (getIntent().getBooleanExtra("openAi", false)) {
+                getIntent().removeExtra("openAi");
+                if (timeline.getAllClipCount() == 0) showAiCreateDialog();
+            }
         });
         timelineScroll.getViewTreeObserver().addOnScrollChangedListener(() -> {
             rulerScroll.scrollTo(timelineScroll.getScrollX(), 0);
@@ -1682,7 +1688,7 @@ public class EditingActivity extends AppCompatActivityImpl {
                 ViewGroup.LayoutParams.MATCH_PARENT,//ViewGroup.LayoutParams.MATCH_PARENT,
                 TRACK_HEIGHT
         ));
-        addNewTrackBlankTrackSpacer.setBackgroundColor(Color.parseColor("#222222"));
+        addNewTrackBlankTrackSpacer.setBackgroundColor(0xFF121218);
         addNewTrackBlankTrackSpacer.setPadding(4, 4, 4, 4);
         handleTrackInteraction(addNewTrackBlankTrackSpacer);
 
@@ -3043,7 +3049,7 @@ public class EditingActivity extends AppCompatActivityImpl {
                 ViewGroup.LayoutParams.MATCH_PARENT,//ViewGroup.LayoutParams.MATCH_PARENT,
                 TRACK_HEIGHT
         ));
-        track.setBackgroundColor(Color.parseColor("#222222"));
+        track.setBackgroundColor(0xFF121218);
         track.setPadding(4, 4, 4, 4);
 
         // 👻 Add spacer to align 0s with center playhead
@@ -3063,7 +3069,7 @@ public class EditingActivity extends AppCompatActivityImpl {
         );
         trackInfoView.setLayoutParams(trackInfoParams);
         trackInfoView.setGravity(Gravity.CENTER);
-        trackInfoView.setText( "Track " + trackCount);
+        trackInfoView.setText(getString(R.string.eia_track_label, trackCount + 1));
 
 
         final int finalTrackIndex = trackCount;
@@ -5004,7 +5010,7 @@ public class EditingActivity extends AppCompatActivityImpl {
         while (d.phantomRows.size() < count) {
             TrackFrameLayout row = new TrackFrameLayout(this);
             row.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, TRACK_HEIGHT));
-            row.setBackgroundColor(Color.parseColor("#222222"));
+            row.setBackgroundColor(0xFF121218);
             row.setPadding(4, 4, 4, 4);
             timelineTracksContainer.addView(row); // after the blank row, so row order matches track order
             d.phantomRows.add(row);
@@ -5949,10 +5955,10 @@ public class EditingActivity extends AppCompatActivityImpl {
         }
 
         public void select() {
-            viewRef.setBackgroundColor(0xFFAAAAAA);
+            viewRef.setBackgroundColor(0xFF24242E);
         }
         public void deselect() {
-            viewRef.setBackgroundColor(0xFF222222);
+            viewRef.setBackgroundColor(0xFF121218);
         }
 
         public void clearTransition() {
@@ -6442,9 +6448,9 @@ public class EditingActivity extends AppCompatActivityImpl {
 
             leftHandle = new ImageView(clipView.getContext());
             leftHandle.setElevation(ELEVATION_HANDLERS);
-            leftHandle.setBackgroundColor(activity.getColor(R.color.ios_blue));
+            leftHandle.setBackgroundColor(Color.WHITE);
             ((ImageView) leftHandle).setImageResource(R.drawable.baseline_more_vert_24);
-            ((ImageView) leftHandle).setColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN);
+            ((ImageView) leftHandle).setColorFilter(0xFF0B0B0F, PorterDuff.Mode.SRC_IN);
             ((ImageView) leftHandle).setScaleType(ImageView.ScaleType.CENTER);
             RelativeLayout.LayoutParams leftParams = new RelativeLayout.LayoutParams(handleWidthDip, ViewGroup.LayoutParams.MATCH_PARENT);
             //leftParams.addRule(RelativeLayout.ALIGN_PARENT_START);
@@ -6455,9 +6461,9 @@ public class EditingActivity extends AppCompatActivityImpl {
 
             rightHandle = new ImageView(clipView.getContext());
             rightHandle.setElevation(ELEVATION_HANDLERS);
-            rightHandle.setBackgroundColor(activity.getColor(R.color.ios_blue));
+            rightHandle.setBackgroundColor(Color.WHITE);
             ((ImageView) rightHandle).setImageResource(R.drawable.baseline_more_vert_24);
-            ((ImageView) rightHandle).setColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN);
+            ((ImageView) rightHandle).setColorFilter(0xFF0B0B0F, PorterDuff.Mode.SRC_IN);
             ((ImageView) rightHandle).setScaleType(ImageView.ScaleType.CENTER);
             RelativeLayout.LayoutParams rightParams = new RelativeLayout.LayoutParams(handleWidthDip, ViewGroup.LayoutParams.MATCH_PARENT);
             //rightParams.addRule(RelativeLayout.ALIGN_PARENT_END);
