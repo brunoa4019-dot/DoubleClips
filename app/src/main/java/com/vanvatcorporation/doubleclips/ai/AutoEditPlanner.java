@@ -238,6 +238,114 @@ public final class AutoEditPlanner {
         return best;
     }
 
+    // Effects that read well on anime edits, by role.
+    private static final String[] HIT_FX = {"punch-zoom", "shake-hit", "rgb-shift", "flash"};
+    private static final String[] DROP_FX = {"white-out", "flash", "lens-flare-surge"};
+    private static final String[] LOUD_FX = {"beat-pulse", "heartbeat", "warp-zoom"};
+    private static final String[] SOFT_FX = {"slow-push", "vignette", "glow", "drift-blur"};
+
+    private static final String[] HYPE_TRANSITIONS = {"zoom-blur", "whip-left", "zoom-blur", "custom_radial-shockwave", "fadewhite"};
+    private static final String[] BALANCED_TRANSITIONS = {"zoom-blur", "whip-left", "fade", "fadewhite"};
+    private static final String[] CHILL_TRANSITIONS = {"fade", "dissolve", "fadeblack", "hblur", "radial"};
+
+    private AutoEditPlanner() { }
+
+    /**
+     * @param beats       from {@link BeatDetector}
+     * @param songLength  length of the edit in seconds (usually the song's)
+     * @param seed        same seed + same input = same edit; a new seed gives a new version
+     */
+    public static Plan plan(BeatDetector.Result beats, float songLength, List<Source> sources, Style style, long seed) {
+        Plan plan = new Plan();
+        plan.duration = songLength;
+        List<Source> usable = new ArrayList<>();
+        for (Source s : sources) if (s.duration >= 0.3f) usable.add(s);
+        if (usable.isEmpty() || songLength <= 0) return plan;
+        Random rnd = new Random(seed);
+
+        // ---- cut points ----
+        List<Float> cuts = new ArrayList<>();
+        cuts.add(0f);
+        float[] b = beats.beats;
+        if (b.length < 4) {
+            // no usable rhythm: even cuts
+            float step = style == Style.HYPE ? 0.8f : style == Style.BALANCED ? 1.6f : 3.2f;
+            for (float t = step; t < songLength - 0.2f; t += step) cuts.add(t);
+        } else {
+            int i = 0;
+            while (i < b.length) {
+                float e = beats.beatEnergy[i];
+                int every = beatsPerShot(style, e, rnd);
+                // hard hit inside the next shot? cut right on it
+                int next = Math.min(b.length, i + every);
+                for (int k = i + 1; k < next; k++) {
+                    if (beats.beatStrength[k] > 0.85f && style != Style.CHILL) { next = k; break; }
+                }
+                if (next >= b.length) break;
+                float t = b[next];
+                if (t > songLength - 0.2f) break;
+                if (t - cuts.get(cuts.size() - 1) >= minShot(style)) cuts.add(t);
+                i = next;
+            }
+        }
+        cuts.add(songLength);
+
+        // ---- sources ----
+        SourcePicker picker = new SourcePicker(usable, rnd);
+        float maxPiece = picker.maxPiece();
+
+        float prevEnergy = energyAt(beats, 0);
+        for (int c = 0; c + 1 < cuts.size(); c++) {
+            float start = cuts.get(c), end = cuts.get(c + 1);
+            if (end - start > maxPiece) {
+                // no clip part is that long: split the shot
+                float mid = start + maxPiece * 0.95f;
+                cuts.add(c + 1, mid);
+                end = mid;
+            }
+            float len = end - start;
+            Shot shot = new Shot();
+            shot.start = start;
+            shot.duration = len;
+            picker.fill(shot, len);
+
+            // ---- effects ----
+            float strength = strengthAt(beats, start);
+            float energy = energyAt(beats, start);
+            boolean drop = energy - prevEnergy > 0.35f;
+            prevEnergy = energy;
+            if (drop && style != Style.CHILL) {
+                shot.effect = pick(DROP_FX, rnd);
+                shot.effectStrength = 1.2f;
+            } else if (strength > hitThreshold(style) && !previousHadEffect(plan)) {
+                shot.effect = style == Style.CHILL ? pick(SOFT_FX, rnd) : pick(HIT_FX, rnd);
+                shot.effectStrength = 0.8f + strength * 0.6f;
+            } else if (energy > 0.75f && style == Style.HYPE && rnd.nextFloat() < 0.35f) {
+                shot.effect = pick(LOUD_FX, rnd);
+            } else if (style == Style.CHILL && len > 3f && rnd.nextFloat() < 0.4f) {
+                shot.effect = pick(SOFT_FX, rnd);
+            }
+            plan.shots.add(shot);
+        }
+
+        // ---- transitions: on big changes of the song, and now and then ----
+        for (int k = 0; k + 1 < plan.shots.size(); k++) {
+            Shot a = plan.shots.get(k), n = plan.shots.get(k + 1);
+            float change = Math.abs(energyAt(beats, n.start) - energyAt(beats, a.start));
+            float chance = style == Style.HYPE ? 0.08f : style == Style.BALANCED ? 0.18f : 0.45f;
+            boolean section = change > 0.3f;
+            if (!section && rnd.nextFloat() > chance) continue;
+            float d = style == Style.HYPE ? 0.25f : style == Style.BALANCED ? 0.4f : 0.7f;
+            d = Math.min(d, Math.min(a.duration, n.duration) * 0.5f);
+            if (d < 0.12f) continue;
+            String[] pool = style == Style.HYPE ? HYPE_TRANSITIONS : style == Style.BALANCED ? BALANCED_TRANSITIONS : CHILL_TRANSITIONS;
+            a.transitionOut = pick(pool, rnd);
+            a.transitionDuration = d;
+        }
+        return plan;
+    }
+
+
     // ================================ copy a reference edit ================================
 
     /**
